@@ -1,0 +1,45 @@
+services:
+  # 1. Backend Web Service (Express API)
+  - type: web
+    name: project-safe-server
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: project-safe-db
+          property: connectionString
+
+  # 2. Frontend Static Site (React PWA)
+  - type: web
+    name: project-safe-client
+    runtime: static
+    plan: free
+    rootDir: client
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: project-safe-server
+          property: host
+
+databases:
+  # 3. PostgreSQL Managed Database
+  - name: project-safe-db
+    plan: free
+    databaseName: safe_humanitarian_db
+    user: safe_user
