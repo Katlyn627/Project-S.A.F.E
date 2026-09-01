@@ -1,12 +1,11 @@
 services:
-  # 1. Backend Web Service (Express API)
+  # Unified Full-Stack Service (React PWA + Ingestion API Engine)
   - type: web
     name: project-safe-server
     env: node
     plan: free
-    rootDir: server
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    buildCommand: npm --prefix client install && npm --prefix client run build && npm --prefix server install && npm --prefix server run build
+    startCommand: npm --prefix server start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -18,26 +17,8 @@ services:
           name: project-safe-db
           property: connectionString
 
-  # 2. Frontend Static Site (React PWA)
-  - type: web
-    name: project-safe-client
-    env: static
-    rootDir: client
-    buildCommand: npm install && npm run build
-    staticPublishPath: dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: VITE_API_URL
-        fromService:
-          type: web
-          name: project-safe-server
-          property: host
-
 databases:
-  # 3. PostgreSQL Managed Database
+  # PostgreSQL Managed Database
   - name: project-safe-db
     plan: free
     databaseName: safe_humanitarian_db
