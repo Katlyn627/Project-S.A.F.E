@@ -8,6 +8,9 @@ import { BackgroundSyncPlugin } from 'workbox-background-sync'
 
 declare const self: ServiceWorkerGlobalScope
 
+self.addEventListener('install', () => {
+  void self.skipWaiting()
+})
 clientsClaim()
 cleanupOutdatedCaches()
 

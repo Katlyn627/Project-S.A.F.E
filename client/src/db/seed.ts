@@ -112,14 +112,13 @@ const RISK_FACTOR_POOL = [
 
 export const seedMockData = async (force: boolean = false) => {
   const count = await db.students.count()
-  if (count > 0 && !force) return
+  const shouldReSeed = force || count < 200
+  if (!shouldReSeed) return
 
-  if (force) {
-    await db.students.clear()
-    await db.attendance.clear()
-    await db.alerts.clear()
-    await db.voiceFeedback.clear()
-  }
+  await db.students.clear()
+  await db.attendance.clear()
+  await db.alerts.clear()
+  await db.voiceFeedback.clear()
 
   const students: Student[] = []
   const alerts: Alert[] = []
