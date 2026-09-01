@@ -1,24 +1,24 @@
 export interface AttendanceRiskSample {
-  status: 'present' | 'absent'
-  isExcused: boolean
+  present: boolean
+  unexcused: boolean
 }
 
 export const countConsecutiveUnexcusedAbsences = (
-  attendanceHistory: AttendanceRiskSample[],
+  attendanceHistory: AttendanceRiskSample[]
 ): number => {
   let consecutiveAbsences = 0
 
-  for (const record of attendanceHistory) {
-    if (record.status === 'absent' && !record.isExcused) {
+  for (let i = attendanceHistory.length - 1; i >= 0; i--) {
+    const record = attendanceHistory[i]
+    if (!record.present && record.unexcused) {
       consecutiveAbsences += 1
-      continue
+    } else {
+      break
     }
-
-    break
   }
 
   return consecutiveAbsences
 }
 
 export const isStudentAtRisk = (attendanceHistory: AttendanceRiskSample[]): boolean =>
-  countConsecutiveUnexcusedAbsences(attendanceHistory) > 3
+  countConsecutiveUnexcusedAbsences(attendanceHistory) >= 3

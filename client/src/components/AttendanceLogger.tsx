@@ -1,184 +1,338 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { db, type AttendanceRecord } from '../db/schema'
-import { encryptJson, makeEncryptedUid } from '../db/crypto'
-import { isStudentAtRisk } from '../offline/risk'
-import { flushSyncQueue } from '../offline/syncManager'
+import React, { useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db, type Attendance, type Student } from '../db/schema'
+import { checkAndTriggerEarlyWarning } from '../offline/riskEngine'
+import { CheckCircle2, XCircle, AlertTriangle, Users, Calendar, School, Check, Clock } from 'lucide-react'
 
-const todayDate = (): string => new Date().toISOString().slice(0, 10)
+const getTodayDate = () => new Date().toISOString().slice(0, 10)
 
-const createMutationId = (): string =>
-  `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+export const AttendanceLogger: React.FC = () => {
+  const [selectedSchool, setSelectedSchool] = useState<string>('SCH-MARA-01')
+  const [selectedGrade, setSelectedGrade] = useState<number>(8)
+  const [selectedDate, setSelectedDate] = useState<string>(getTodayDate())
+  const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'alert' | 'info' } | null>(null)
+  const [studentNotes] = useState<Record<string, string>>({})
 
-export const AttendanceLogger = () => {
-  const [classCode, setClassCode] = useState('P7')
-  const [rawUid, setRawUid] = useState('')
-  const [status, setStatus] = useState<AttendanceRecord['status']>('present')
-  const [isExcused, setIsExcused] = useState(false)
-  const [entryDate, setEntryDate] = useState(todayDate())
-  const [recentRecords, setRecentRecords] = useState<AttendanceRecord[]>([])
-  const [message, setMessage] = useState('')
+  // Fetch students matching selected school & grade
+  const students = useLiveQuery(
+    () => db.students
+      .where('schoolId')
+      .equals(selectedSchool)
+      .filter((s) => s.gradeLevel === selectedGrade)
+      .toArray(),
+    [selectedSchool, selectedGrade]
+  ) ?? []
 
-  useEffect(() => {
-    void db.attendance.orderBy('createdAt').reverse().limit(12).toArray().then(setRecentRecords)
-  }, [])
+  // Fetch existing attendance records for the selected date
+  const dayAttendance = useLiveQuery(
+    () => db.attendance.where('date').equals(selectedDate).toArray(),
+    [selectedDate]
+  ) ?? []
 
-  const absentWarning = useMemo(
-    () => status === 'absent' && !isExcused,
-    [status, isExcused],
-  )
+  // Map of studentUid -> Attendance record for the active date
+  const attendanceMap = new Map<string, Attendance>()
+  dayAttendance.forEach((record) => {
+    attendanceMap.set(record.studentUid, record)
+  })
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  // Fast Roll-Call Action: Mark single student
+  const handleMarkAttendance = async (
+    studentUid: string,
+    present: boolean,
+    unexcused: boolean = true
+  ) => {
+    const existing = attendanceMap.get(studentUid)
+    const notes = studentNotes[studentUid] || existing?.notes || ''
 
-    if (!rawUid.trim()) {
-      setMessage('Student code is required.')
-      return
+    if (existing?.id) {
+      await db.attendance.update(existing.id, {
+        present,
+        unexcused: present ? false : unexcused,
+        notes,
+        synced: 0,
+      })
+    } else {
+      await db.attendance.add({
+        studentUid,
+        date: selectedDate,
+        present,
+        unexcused: present ? false : unexcused,
+        notes,
+        synced: 0,
+        createdAt: new Date().toISOString(),
+      })
     }
 
-    const uidCipher = await makeEncryptedUid(rawUid.trim())
-    const record: AttendanceRecord = {
-      uidCipher,
-      classCode,
-      date: entryDate,
-      status,
-      isExcused,
-      synced: false,
-      createdAt: new Date().toISOString(),
+    // Check early-warning risk threshold if marked absent
+    if (!present && unexcused) {
+      const riskResult = await checkAndTriggerEarlyWarning(studentUid, selectedDate)
+      if (riskResult.alertCreated) {
+        setStatusMessage({
+          text: `⚠️ EARLY-WARNING TRIGGERED: Student ${studentUid} has ${riskResult.consecutiveAbsences} consecutive unexcused absences. Casework alert opened.`,
+          type: 'alert',
+        })
+        return
+      }
     }
 
-    const attendanceId = await db.attendance.add(record)
-
-    await db.syncQueue.put({
-      mutationId: createMutationId(),
-      entity: 'attendance',
-      entityId: String(attendanceId),
-      operation: 'upsert',
-      payloadCipher: await encryptJson(record),
-      createdAt: new Date().toISOString(),
-      attempts: 0,
+    setStatusMessage({
+      text: `Attendance saved locally for ${studentUid}.`,
+      type: 'success',
     })
-
-    const attendanceHistory = await db.attendance
-      .where('uidCipher')
-      .equals(uidCipher)
-      .reverse()
-      .sortBy('date')
-
-    if (isStudentAtRisk(attendanceHistory.reverse())) {
-      const reason = 'Student has more than 3 consecutive unexcused absences.'
-      const riskId = await db.riskFlags.add({
-        uidCipher,
-        reason,
-        createdAt: new Date().toISOString(),
-      })
-
-      await db.syncQueue.put({
-        mutationId: createMutationId(),
-        entity: 'risk_flag',
-        entityId: String(riskId),
-        operation: 'upsert',
-        payloadCipher: await encryptJson({ uidCipher, reason }),
-        createdAt: new Date().toISOString(),
-        attempts: 0,
-      })
-    }
-
-    const latest = await db.attendance.orderBy('createdAt').reverse().limit(12).toArray()
-    setRecentRecords(latest)
-    setRawUid('')
-    setStatus('present')
-    setIsExcused(false)
-
-    if (navigator.onLine) {
-      await flushSyncQueue()
-      setMessage('Saved locally and synced to central server.')
-      return
-    }
-
-    setMessage('Saved locally. Pending sync when connectivity returns.')
   }
 
+  // Quick Action: Mark all students present in one click
+  const handleMarkAllPresent = async () => {
+    if (students.length === 0) return
+
+    for (const student of students) {
+      const existing = attendanceMap.get(student.uid)
+      if (existing?.id) {
+        await db.attendance.update(existing.id, {
+          present: true,
+          unexcused: false,
+          synced: 0,
+        })
+      } else {
+        await db.attendance.add({
+          studentUid: student.uid,
+          date: selectedDate,
+          present: true,
+          unexcused: false,
+          synced: 0,
+          createdAt: new Date().toISOString(),
+        })
+      }
+    }
+
+    setStatusMessage({
+      text: `Marked all ${students.length} students as Present for ${selectedDate}.`,
+      type: 'success',
+    })
+  }
+
+  const presentCount = students.filter((s) => attendanceMap.get(s.uid)?.present === true).length
+  const absentCount = students.filter((s) => attendanceMap.get(s.uid)?.present === false).length
+  const unmarkedCount = students.length - (presentCount + absentCount)
+
   return (
-    <section className="mx-auto w-full max-w-3xl rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <h1 className="text-2xl font-semibold text-slate-900">Daily Attendance Logger</h1>
-      <p className="mt-1 text-sm text-slate-600">
-        No student names are stored. Use mentor-issued student codes only.
-      </p>
+    <div className="space-y-6">
+      {/* Header & Controls Bar */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Users className="h-5 w-5 text-indigo-600" />
+              Daily Classroom Roll-Call
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Zero plaintext PII · Encrypted beneficiary UIDs · Instant local commit
+            </p>
+          </div>
 
-      <form className="mt-6 grid gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
-        <label className="text-sm font-medium text-slate-700">
-          Class
-          <input
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            value={classCode}
-            onChange={(event) => setClassCode(event.target.value.toUpperCase())}
-          />
-        </label>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleMarkAllPresent}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-500 transition active:scale-95"
+            >
+              <Check className="h-4 w-4" />
+              Mark All Present
+            </button>
+          </div>
+        </div>
 
-        <label className="text-sm font-medium text-slate-700">
-          Student code
-          <input
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            value={rawUid}
-            onChange={(event) => setRawUid(event.target.value)}
-            placeholder="e.g. SAFEX7P1"
-          />
-        </label>
+        {/* Filter selectors */}
+        <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3 border-t border-slate-100 pt-4">
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
+              <School className="h-3.5 w-3.5" /> Partner School
+            </label>
+            <select
+              value={selectedSchool}
+              onChange={(e) => setSelectedSchool(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="SCH-MARA-01">Mara Primary (SCH-MARA-01)</option>
+              <option value="SCH-RIV-02">Riverbend Academy (SCH-RIV-02)</option>
+            </select>
+          </div>
 
-        <label className="text-sm font-medium text-slate-700">
-          Date
-          <input
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            type="date"
-            value={entryDate}
-            onChange={(event) => setEntryDate(event.target.value)}
-          />
-        </label>
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
+              <Users className="h-3.5 w-3.5" /> Grade Level
+            </label>
+            <select
+              value={selectedGrade}
+              onChange={(e) => setSelectedGrade(Number(e.target.value))}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
+            >
+              <option value={7}>Grade 7 (Standard 7)</option>
+              <option value={8}>Grade 8 (Standard 8)</option>
+            </select>
+          </div>
 
-        <label className="text-sm font-medium text-slate-700">
-          Status
-          <select
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-            value={status}
-            onChange={(event) => setStatus(event.target.value as AttendanceRecord['status'])}
-          >
-            <option value="present">Present</option>
-            <option value="absent">Absent</option>
-          </select>
-        </label>
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
+              <Calendar className="h-3.5 w-3.5" /> Roll Date
+            </label>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
+            />
+          </div>
+        </div>
 
-        <label className="md:col-span-2 inline-flex items-center gap-2 text-sm text-slate-700">
-          <input
-            type="checkbox"
-            checked={isExcused}
-            disabled={!absentWarning}
-            onChange={(event) => setIsExcused(event.target.checked)}
-          />
-          Mark absence as excused
-        </label>
-
-        <button
-          type="submit"
-          className="md:col-span-2 rounded bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-500"
-        >
-          Save attendance offline
-        </button>
-      </form>
-
-      {message ? <p className="mt-4 text-sm text-slate-700">{message}</p> : null}
-
-      <div className="mt-8">
-        <h2 className="text-lg font-semibold text-slate-900">Latest local entries</h2>
-        <ul className="mt-2 space-y-2 text-sm text-slate-700">
-          {recentRecords.map((record) => (
-            <li key={`${record.uidCipher}-${record.createdAt}`} className="rounded border border-slate-200 p-2">
-              <span className="font-medium">{record.classCode}</span> · {record.date} ·{' '}
-              {record.status}
-              {record.isExcused ? ' (excused)' : ''} · {record.synced ? 'Synced' : 'Pending sync'}
-            </li>
-          ))}
-        </ul>
+        {/* Quick Stats Summary */}
+        <div className="mt-4 flex flex-wrap items-center gap-4 text-xs font-medium text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+          <span className="text-slate-900 font-semibold">Roster Summary:</span>
+          <span className="text-emerald-700 font-semibold">{presentCount} Present</span>
+          <span className="text-rose-700 font-semibold">{absentCount} Absent</span>
+          <span className="text-amber-700 font-semibold">{unmarkedCount} Unmarked</span>
+          <span className="text-slate-400">|</span>
+          <span>{students.length} Total Enrolled</span>
+        </div>
       </div>
-    </section>
+
+      {/* Dynamic Status / Alert Banner */}
+      {statusMessage && (
+        <div
+          className={`rounded-lg p-3.5 text-xs font-medium flex items-center justify-between shadow-sm transition ${
+            statusMessage.type === 'alert'
+              ? 'bg-rose-50 text-rose-900 border border-rose-200'
+              : statusMessage.type === 'success'
+              ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+              : 'bg-indigo-50 text-indigo-900 border border-indigo-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {statusMessage.type === 'alert' ? (
+              <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+            )}
+            <span>{statusMessage.text}</span>
+          </div>
+          <button
+            onClick={() => setStatusMessage(null)}
+            className="text-slate-400 hover:text-slate-600 text-sm font-bold ml-2"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* Roster Cards Grid */}
+      <div className="space-y-3">
+        {students.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+            No students found for {selectedSchool} Grade {selectedGrade}. Please seed or register students.
+          </div>
+        ) : (
+          students.map((student: Student) => {
+            const currentAttendance = attendanceMap.get(student.uid)
+            const isPresent = currentAttendance?.present === true
+            const isAbsentUnexcused = currentAttendance?.present === false && currentAttendance?.unexcused === true
+            const isAbsentExcused = currentAttendance?.present === false && currentAttendance?.unexcused === false
+            const isLogged = currentAttendance !== undefined
+
+            return (
+              <div
+                key={student.uid}
+                className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border p-4 transition bg-white shadow-sm ${
+                  isAbsentUnexcused
+                    ? 'border-rose-200 bg-rose-50/30'
+                    : isPresent
+                    ? 'border-emerald-200 bg-emerald-50/20'
+                    : 'border-slate-200'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-900 font-mono text-xs font-bold text-white">
+                    {student.uid.slice(-4)}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm font-bold text-slate-900 tracking-wide">
+                        {student.uid}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                          student.status === 'at-risk'
+                            ? 'bg-rose-100 text-rose-800'
+                            : student.status === 'remediated'
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {student.status}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
+                      <span>Grade {student.gradeLevel}</span>
+                      <span>·</span>
+                      <span className="flex items-center gap-1">
+                        {isLogged ? (
+                          currentAttendance?.synced === 1 ? (
+                            <span className="text-emerald-600 font-medium flex items-center gap-0.5">
+                              <CheckCircle2 className="h-3 w-3" /> Synced
+                            </span>
+                          ) : (
+                            <span className="text-amber-600 font-medium flex items-center gap-0.5">
+                              <Clock className="h-3 w-3" /> Pending Sync
+                            </span>
+                          )
+                        ) : (
+                          <span className="text-slate-400 italic">Not logged today</span>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Fast Action Buttons */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 sm:pt-0">
+                  <button
+                    onClick={() => handleMarkAttendance(student.uid, true, false)}
+                    className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition active:scale-95 ${
+                      isPresent
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'border border-slate-200 bg-slate-50 text-slate-700 hover:bg-emerald-50 hover:text-emerald-700'
+                    }`}
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Present
+                  </button>
+
+                  <button
+                    onClick={() => handleMarkAttendance(student.uid, false, true)}
+                    className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition active:scale-95 ${
+                      isAbsentUnexcused
+                        ? 'bg-rose-600 text-white shadow-sm'
+                        : 'border border-slate-200 bg-slate-50 text-slate-700 hover:bg-rose-50 hover:text-rose-700'
+                    }`}
+                  >
+                    <XCircle className="h-3.5 w-3.5" />
+                    Absent (Unexcused)
+                  </button>
+
+                  <button
+                    onClick={() => handleMarkAttendance(student.uid, false, false)}
+                    className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition active:scale-95 ${
+                      isAbsentExcused
+                        ? 'bg-amber-600 text-white shadow-sm'
+                        : 'border border-slate-200 bg-slate-50 text-slate-600 hover:bg-amber-50 hover:text-amber-700'
+                    }`}
+                  >
+                    Excused
+                  </button>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
   )
 }

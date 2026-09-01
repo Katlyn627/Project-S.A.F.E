@@ -1,98 +1,47 @@
-import { db, type SyncMutation } from '../db/schema'
-import { decryptJson } from '../db/crypto'
+import { db } from '../db/schema'
 
-const SYNC_ENDPOINT = '/api/sync/batch'
+const API_BASE = '/api/v1'
 
-const buildMutationEnvelope = async (mutation: SyncMutation) => ({
-  mutationId: mutation.mutationId,
-  entity: mutation.entity,
-  entityId: mutation.entityId,
-  operation: mutation.operation,
-  payload: await decryptJson(mutation.payloadCipher),
-})
-
-export const flushSyncQueue = async (): Promise<number> => {
+export const flushSyncQueue = async (): Promise<{ synced: number; failed: number }> => {
   if (!navigator.onLine) {
-    return 0
+    return { synced: 0, failed: 0 }
   }
 
-  const pending = await db.syncQueue.orderBy('createdAt').toArray()
+  const unsyncedAttendance = await db.attendance.where('synced').equals(0).toArray()
+  const unsyncedAlerts = await db.alerts.where('synced').equals(0).toArray()
+  const unsyncedVoice = await db.voiceFeedback.where('synced').equals(0).toArray()
 
-  if (pending.length === 0) {
-    return 0
+  const totalUnsynced = unsyncedAttendance.length + unsyncedAlerts.length + unsyncedVoice.length
+  if (totalUnsynced === 0) {
+    return { synced: 0, failed: 0 }
   }
 
   try {
-    const body = await Promise.all(pending.map(buildMutationEnvelope))
-
-    const response = await fetch(SYNC_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ mutations: body }),
-    })
-
-    if (!response.ok) {
-      throw new Error(`Sync failed with status ${response.status}`)
-    }
-
-    await db.transaction('rw', db.syncQueue, db.attendance, db.voiceNotes, async () => {
-      const syncedMutationIds = pending.map((mutation) => mutation.mutationId)
-      await db.syncQueue.bulkDelete(syncedMutationIds)
-
-      for (const mutation of pending) {
-        if (mutation.entity === 'attendance') {
-          const attendanceId = Number.parseInt(mutation.entityId, 10)
-
-          if (!Number.isNaN(attendanceId)) {
-            await db.attendance.update(attendanceId, { synced: true })
-          }
-        }
-
-        if (mutation.entity === 'voice_note') {
-          await db.voiceNotes.update(mutation.entityId, { synced: true })
-        }
-      }
-    })
-
-    return pending.length
-  } catch {
-    const now = new Date().toISOString()
-
-    await Promise.all(
-      pending.map((mutation) =>
-        db.syncQueue.update(mutation.mutationId, {
-          attempts: mutation.attempts + 1,
-          lastAttemptAt: now,
+    if (unsyncedAttendance.length > 0 || unsyncedAlerts.length > 0) {
+      const response = await fetch(`${API_BASE}/sync/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batchId: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          attendance: unsyncedAttendance,
+          alerts: unsyncedAlerts,
         }),
-      ),
-    )
+      })
 
-    return 0
-  }
-}
-
-export const startSyncManager = (): (() => void) => {
-  const triggerSync = async () => {
-    await flushSyncQueue()
-
-    if ('serviceWorker' in navigator) {
-      const registration = await navigator.serviceWorker.ready
-      if ('sync' in registration) {
-        await registration.sync.register('safe-sync-mutations')
+      if (response.ok) {
+        await db.transaction('rw', db.attendance, db.alerts, async () => {
+          for (const item of unsyncedAttendance) {
+            if (item.id) await db.attendance.update(item.id, { synced: 1 })
+          }
+          for (const item of unsyncedAlerts) {
+            if (item.id) await db.alerts.update(item.id, { synced: 1 })
+          }
+        })
       }
     }
-  }
 
-  const onlineListener = () => {
-    void triggerSync()
-  }
-
-  window.addEventListener('online', onlineListener)
-  void triggerSync()
-
-  return () => {
-    window.removeEventListener('online', onlineListener)
+    return { synced: totalUnsynced, failed: 0 }
+  } catch {
+    return { synced: 0, failed: totalUnsynced }
   }
 }

@@ -4,6 +4,15 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),
@@ -25,9 +34,6 @@ export default defineConfig({
         display: 'standalone',
         start_url: '/',
         scope: '/',
-      },
-      workbox: {
-        maximumFileSizeToCacheInBytes: 1_800_000,
       },
       devOptions: {
         enabled: true,
