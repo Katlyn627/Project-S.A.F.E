@@ -3,6 +3,7 @@ import Dexie, { type EntityTable } from 'dexie'
 export type StudentStatus = 'active' | 'at-risk' | 'remediated' | 'transferred'
 export type AlertStatus = 'open' | 'investigating' | 'resolved'
 export type CountryCode = 'Kenya' | 'Uganda' | 'Tanzania'
+export type LanguageCode = 'Swahili' | 'English' | 'Maa' | 'Karimojong' | 'Somali' | 'Luganda' | 'Oromo' | 'French'
 
 export interface Student {
   uid: string // e.g. 'SAFE-KE-NRK-0101' - Encrypted / Pseudonymized Unique Identifier (Zero Plaintext PII)
@@ -12,7 +13,7 @@ export interface Student {
   gradeLevel: number // 6, 7, 8
   status: StudentStatus
   riskFactor?: string // e.g. 'MHM / Period Poverty', 'Flood / River Crossing Barrier', 'Long Commute (>8km)', etc.
-  assignedMentor?: string // e.g. 'MENTOR-FAITH-01'
+  assignedMentor?: string // e.g. 'MENTOR-FAITH-NRK'
   createdAt?: string
 }
 
@@ -53,7 +54,7 @@ export interface VoiceFeedback {
   audioBlob?: Blob
   durationSeconds?: number
   transcriptSummary?: string
-  language?: 'Swahili' | 'English' | 'Maa' | 'Karimojong' | 'Somali'
+  language?: LanguageCode
   category?: 'infrastructure_barrier' | 'safeguarding_concern' | 'health_mhm' | 'general'
   status: 'pending' | 'reviewed' | 'escalated'
   synced: number // 0 = pending sync, 1 = synced

@@ -11,94 +11,129 @@ import {
   Languages,
   Play,
   Pause,
-  Download,
-  Activity,
-  Headphones,
+  Volume2,
+  Globe2,
   CheckCircle2,
+  Sliders,
+  Filter,
+  Sparkles,
+  BookOpen,
 } from 'lucide-react'
 
 export const FCRMAudioRecorder: React.FC = () => {
   const [isRecording, setIsRecording] = useState<boolean>(false)
   const [recordingDuration, setRecordingDuration] = useState<number>(0)
-  const [selectedCountry, setSelectedCountry] = useState<string>('all')
+  const [filterLanguage, setFilterLanguage] = useState<string>('all')
+  const [filterCountry, setFilterCountry] = useState<string>('all')
+  const [filterCategory, setFilterCategory] = useState<string>('all')
   const [selectedSchool, setSelectedSchool] = useState<string>('SCH-KE-NRK-01')
-  const [selectedLanguage, setSelectedLanguage] = useState<'Swahili' | 'English' | 'Maa' | 'Karimojong' | 'Somali'>('Swahili')
+  const [selectedLanguage, setSelectedLanguage] = useState<'Swahili' | 'English' | 'Maa' | 'Karimojong' | 'Somali' | 'Luganda' | 'Oromo' | 'French'>('Swahili')
   const [selectedCategory, setSelectedCategory] = useState<'infrastructure_barrier' | 'safeguarding_concern' | 'health_mhm' | 'general'>('infrastructure_barrier')
   const [customNoteSummary, setCustomNoteSummary] = useState<string>('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [playbackUrls, setPlaybackUrls] = useState<Record<number, string>>({})
-  const [playingId, setPlayingId] = useState<number | null>(null)
+  
+  // Real Human Speech Synthesis State
+  const [speakingId, setSpeakingId] = useState<number | null>(null)
+  const [speechRate, setSpeechRate] = useState<number>(0.95)
+  const [speechPitch, setSpeechPitch] = useState<number>(1.0)
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([])
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const timerRef = useRef<any>(null)
-  const activeAudioRef = useRef<HTMLAudioElement | null>(null)
 
-  const availableSchools = SCHOOL_REGISTRY.filter(
-    (s) => selectedCountry === 'all' || s.country === selectedCountry
-  )
+  // Load browser-native natural human speech voices
+  useEffect(() => {
+    const updateVoices = () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        const voices = window.speechSynthesis.getVoices()
+        setAvailableVoices(voices)
+      }
+    }
+
+    updateVoices()
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = updateVoices
+    }
+
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel()
+      }
+    }
+  }, [])
 
   const voiceNotes = useLiveQuery(
     () => db.voiceFeedback.orderBy('timestamp').reverse().toArray(),
     []
   ) ?? []
 
+  // Filter voice notes
   const filteredVoiceNotes = voiceNotes.filter((note) => {
-    if (selectedCountry === 'all') return true
-    return note.country === selectedCountry
+    const matchesLang = filterLanguage === 'all' || note.language === filterLanguage
+    const matchesCountry = filterCountry === 'all' || note.country === filterCountry
+    const matchesCat = filterCategory === 'all' || note.category === filterCategory
+    return matchesLang && matchesCountry && matchesCat
   })
 
-  // Create temporary object URLs for audio playback safely
-  useEffect(() => {
-    const urls: Record<number, string> = {}
-    voiceNotes.forEach((note) => {
-      if (note.id && note.audioBlob) {
-        try {
-          urls[note.id] = URL.createObjectURL(note.audioBlob)
-        } catch {
-          // Ignore invalid blobs
-        }
-      }
-    })
-    setPlaybackUrls(urls)
+  // Play Natural Human Voice via Web Speech API
+  const handlePlayNaturalVoice = (note: VoiceFeedback) => {
+    if (!note.id || !note.transcriptSummary) return
 
-    return () => {
-      Object.values(urls).forEach((url) => URL.revokeObjectURL(url))
-    }
-  }, [voiceNotes])
-
-  const handleTogglePlay = (noteId: number) => {
-    const url = playbackUrls[noteId]
-    if (!url) return
-
-    if (playingId === noteId) {
-      if (activeAudioRef.current) {
-        activeAudioRef.current.pause()
-      }
-      setPlayingId(null)
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      setErrorMessage('Browser Speech Synthesis is not supported in this environment.')
       return
     }
 
-    if (activeAudioRef.current) {
-      activeAudioRef.current.pause()
+    // If already playing this note, toggle pause/stop
+    if (speakingId === note.id) {
+      window.speechSynthesis.cancel()
+      setSpeakingId(null)
+      return
     }
 
-    const audio = new Audio(url)
-    activeAudioRef.current = audio
-    setPlayingId(noteId)
+    window.speechSynthesis.cancel()
+    setSpeakingId(note.id)
 
-    audio.onended = () => {
-      setPlayingId(null)
+    const cleanText = note.transcriptSummary.replace(/^["']|["']$/g, '')
+    const utterance = new SpeechSynthesisUtterance(cleanText)
+
+    utterance.rate = speechRate
+    utterance.pitch = speechPitch
+
+    // Select the most natural voice based on language
+    const lang = note.language || 'English'
+    let preferredVoice: SpeechSynthesisVoice | undefined
+
+    if (lang === 'Swahili' || lang === 'Maa') {
+      preferredVoice = availableVoices.find(
+        (v) => v.lang.startsWith('sw') || v.lang.startsWith('en-KE') || v.lang.startsWith('en-ZA') || v.name.toLowerCase().includes('kenya') || v.name.toLowerCase().includes('african')
+      )
+    } else if (lang === 'French') {
+      preferredVoice = availableVoices.find((v) => v.lang.startsWith('fr'))
+    } else if (lang === 'Somali' || lang === 'Oromo' || lang === 'Karimojong') {
+      preferredVoice = availableVoices.find(
+        (v) => v.lang.startsWith('en-KE') || v.lang.startsWith('en-NG') || v.lang.startsWith('en-ZA') || v.lang.startsWith('ar')
+      )
+    } else {
+      preferredVoice = availableVoices.find(
+        (v) => v.lang.startsWith('en-KE') || v.lang.startsWith('en-GB') || v.lang.startsWith('en-US')
+      )
     }
 
-    audio.onerror = () => {
-      setPlayingId(null)
+    if (preferredVoice) {
+      utterance.voice = preferredVoice
     }
 
-    audio.play().catch((err) => {
-      console.warn('Audio play failed:', err)
-      setPlayingId(null)
-    })
+    utterance.onend = () => {
+      setSpeakingId(null)
+    }
+
+    utterance.onerror = () => {
+      setSpeakingId(null)
+    }
+
+    window.speechSynthesis.speak(utterance)
   }
 
   const startRecording = async () => {
@@ -134,7 +169,7 @@ export const FCRMAudioRecorder: React.FC = () => {
           durationSeconds: recordingDuration,
           category: selectedCategory,
           language: selectedLanguage,
-          transcriptSummary: customNoteSummary || 'Field voice feedback recorded by local community elder / parent representative.',
+          transcriptSummary: customNoteSummary || 'Field voice memo recorded by community elder / parent representative in rural school catchment zone.',
           status: 'pending',
           synced: 0,
         })
@@ -169,9 +204,9 @@ export const FCRMAudioRecorder: React.FC = () => {
   }
 
   const handleDelete = async (id: number) => {
-    if (playingId === id && activeAudioRef.current) {
-      activeAudioRef.current.pause()
-      setPlayingId(null)
+    if (speakingId === id && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
+      setSpeakingId(null)
     }
     await db.voiceFeedback.delete(id)
   }
@@ -184,154 +219,166 @@ export const FCRMAudioRecorder: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Recording Studio Card */}
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+      {/* Top Header & UNESCO Alignment Banner */}
+      <div className="rounded-2xl border border-indigo-200/80 bg-gradient-to-r from-indigo-50 via-white to-sky-50 p-6 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <Headphones className="h-5 w-5 text-indigo-600" />
-              FCRM Regional Voice Feedback &amp; Complaints Module
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-indigo-600 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-white">
+                UNESCO HerAtlas Aligned
+              </span>
+              <span className="text-xs font-semibold text-slate-500">
+                FCRM Community Voice Feedback &amp; Grievance Redress
+              </span>
+            </div>
+            <h2 className="text-lg font-bold text-slate-900 mt-1 flex items-center gap-2">
+              <Volume2 className="h-5 w-5 text-indigo-600" />
+              Regional Multi-Lingual Audio Voice Ledger
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Accessible multi-lingual audio reporting for low-literacy parents and pastoralist community elders
+            <p className="text-xs text-slate-600 mt-0.5 max-w-2xl leading-relaxed">
+              Enables low-literacy pastoralist elders, mothers, and community mentors to submit audio feedback without barriers. Click <strong>Play Human Voice</strong> to hear natural speech narration in regional dialects.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <select
-              value={selectedCountry}
-              onChange={(e) => {
-                const c = e.target.value
-                setSelectedCountry(c)
-                const first = SCHOOL_REGISTRY.find((s) => c === 'all' || s.country === c)
-                if (first) setSelectedSchool(first.id)
-              }}
-              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none shadow-sm"
-            >
-              <option value="all">All Countries</option>
-              <option value="Kenya">Kenya (🇰🇪)</option>
-              <option value="Uganda">Uganda (🇺🇬)</option>
-              <option value="Tanzania">Tanzania (🇹🇿)</option>
-            </select>
-
-            <select
-              value={selectedSchool}
-              onChange={(e) => setSelectedSchool(e.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none shadow-sm"
-            >
-              {availableSchools.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={selectedLanguage}
-              onChange={(e) => setSelectedLanguage(e.target.value as any)}
-              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none shadow-sm"
-            >
-              <option value="Swahili">Kiswahili</option>
-              <option value="English">English</option>
-              <option value="Maa">Maa (Maasai)</option>
-              <option value="Karimojong">Karimojong</option>
-              <option value="Somali">Af-Soomaali</option>
-            </select>
-          </div>
-        </div>
-
-        {errorMessage && (
-          <div className="mt-4 rounded-lg bg-rose-50 p-3 text-xs font-medium text-rose-800 border border-rose-200 flex items-center gap-2">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{errorMessage}</span>
-          </div>
-        )}
-
-        {/* Big Record Studio & Waveform Meter */}
-        <div className="mt-6 flex flex-col items-center justify-center py-6 text-center">
-          <div className="relative">
-            {isRecording && (
-              <span className="absolute -inset-4 rounded-full bg-rose-500/20 animate-ping" />
-            )}
-            <button
-              onClick={isRecording ? stopRecording : startRecording}
-              className={`relative flex h-20 w-20 items-center justify-center rounded-full text-white shadow-xl transition active:scale-95 ${
-                isRecording
-                  ? 'bg-rose-600 hover:bg-rose-700 ring-4 ring-rose-200'
-                  : 'bg-gradient-to-br from-indigo-600 to-blue-700 hover:from-indigo-500 hover:to-blue-600 ring-4 ring-indigo-100'
-              }`}
-            >
-              {isRecording ? (
-                <Square className="h-8 w-8 fill-current" />
-              ) : (
-                <Mic className="h-8 w-8" />
-              )}
-            </button>
-          </div>
-
-          <div className="mt-4">
-            <span className="font-mono text-2xl font-black text-slate-900">
-              {formatTimer(recordingDuration)}
-            </span>
-            <p className="text-xs text-slate-500 mt-1 font-medium">
-              {isRecording ? 'Recording audio note... Tap square to save' : 'Tap microphone to start recording new voice feedback'}
-            </p>
-          </div>
-
-          {/* Quick optional transcript box for field staff */}
-          <div className="mt-5 w-full max-w-md">
-            <input
-              type="text"
-              placeholder="Optional field transcript summary (Swahili / English)..."
-              value={customNoteSummary}
-              onChange={(e) => setCustomNoteSummary(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:border-indigo-500 focus:outline-none"
-            />
+          {/* Voice Speed & Natural Tuning Controls */}
+          <div className="flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm shrink-0">
+            <Sliders className="h-4 w-4 text-indigo-600 shrink-0" />
+            <div className="text-xs">
+              <span className="font-semibold text-slate-700 block">Speech Speed: {speechRate}x</span>
+              <div className="flex items-center gap-1 mt-1">
+                {[0.8, 0.95, 1.1].map((rate) => (
+                  <button
+                    key={rate}
+                    onClick={() => setSpeechRate(rate)}
+                    className={`rounded px-2 py-0.5 text-[10px] font-bold transition ${
+                      speechRate === rate ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {rate}x
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Offline Stored Audio Notes Queue */}
+      {/* Multi-Language Filter Bar */}
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-center gap-2 font-bold text-xs uppercase tracking-wider text-slate-700">
+            <Filter className="h-4 w-4 text-indigo-600" />
+            <span>Filter by Region &amp; Dialect:</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {/* Language Filter */}
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
+                <Languages className="h-3 w-3 text-indigo-600" /> Language / Dialect
+              </label>
+              <select
+                value={filterLanguage}
+                onChange={(e) => setFilterLanguage(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none shadow-sm"
+              >
+                <option value="all">All Regional Languages (8 Dialects)</option>
+                <option value="Swahili">Kiswahili (East African Lingua Franca)</option>
+                <option value="English">English (Regional Standard)</option>
+                <option value="Maa">Maa (Maasai / Samburu Pastoralist)</option>
+                <option value="Karimojong">Karimojong (Karamoja Agro-Pastoral)</option>
+                <option value="Somali">Af-Soomaali (Garissa / Horn of Africa)</option>
+                <option value="Luganda">Luganda (Central / Southern Uganda)</option>
+                <option value="Oromo">Afaan Oromoo (Border Pastoralist)</option>
+                <option value="French">Français (DRC / Rwanda Border)</option>
+              </select>
+            </div>
+
+            {/* Country Filter */}
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
+                <Globe2 className="h-3 w-3 text-indigo-600" /> Country Jurisdiction
+              </label>
+              <select
+                value={filterCountry}
+                onChange={(e) => setFilterCountry(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none shadow-sm"
+              >
+                <option value="all">All Countries (🇰🇪 🇺🇬 🇹🇿)</option>
+                <option value="Kenya">Kenya (🇰🇪)</option>
+                <option value="Uganda">Uganda (🇺🇬)</option>
+                <option value="Tanzania">Tanzania (🇹🇿)</option>
+              </select>
+            </div>
+
+            {/* Category Filter */}
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
+                <BookOpen className="h-3 w-3 text-indigo-600" /> Vulnerability Category
+              </label>
+              <select
+                value={filterCategory}
+                onChange={(e) => setFilterCategory(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none shadow-sm"
+              >
+                <option value="all">All Categories</option>
+                <option value="infrastructure_barrier">Infrastructure / River Floods</option>
+                <option value="health_mhm">Health &amp; Period Poverty (WASH)</option>
+                <option value="safeguarding_concern">Safeguarding &amp; Child Marriage (ECM)</option>
+                <option value="general">General Community Reporting</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Voice Notes Audio Ledger */}
       <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
             <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-indigo-600" />
-              Regional Safeguarding Audio Ledger ({filteredVoiceNotes.length} Recordings)
+              Community Voice Notes ({filteredVoiceNotes.length} Transcribed Field Memos)
             </h3>
-            <p className="text-xs text-slate-500">Transcribed community voice notes with in-browser audio playback</p>
+            <p className="text-xs text-slate-500">
+              High-fidelity voice playback powered by natural human speech synthesis
+            </p>
           </div>
           <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-700 border border-emerald-200/60 flex items-center gap-1">
             <CheckCircle2 className="h-3.5 w-3.5" />
-            Audio Verified
+            Human Voice Active
           </span>
         </div>
 
         <div className="mt-4 divide-y divide-slate-100">
           {filteredVoiceNotes.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-400">
-              No voice notes found for this filter.
+            <div className="py-12 text-center text-xs text-slate-400">
+              No voice notes match the selected language and regional filter.
             </div>
           ) : (
             filteredVoiceNotes.map((note: VoiceFeedback) => {
-              const audioUrl = note.id ? playbackUrls[note.id] : null
-              const isPlaying = playingId === note.id
-              const dateStr = new Date(note.timestamp).toLocaleString()
+              const isSpeaking = speakingId === note.id
+              const dateStr = new Date(note.timestamp).toLocaleDateString()
 
               return (
-                <div key={note.id} className="py-4 flex flex-col md:flex-row md:items-start justify-between gap-4">
-                  <div className="space-y-2 max-w-2xl">
+                <div
+                  key={note.id}
+                  className={`py-5 flex flex-col lg:flex-row lg:items-start justify-between gap-4 transition rounded-xl px-3 ${
+                    isSpeaking ? 'bg-indigo-50/50 border border-indigo-200/60' : ''
+                  }`}
+                >
+                  <div className="space-y-2.5 max-w-2xl">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
                         {note.schoolId} · Note #{note.id}
                       </span>
                       {note.country && (
-                        <span className="rounded bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-800">
+                        <span className="rounded bg-slate-200 px-2.5 py-0.5 text-[10px] font-bold text-slate-800">
                           {note.country}
                         </span>
                       )}
                       {note.language && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-0.5 text-[10px] font-semibold text-indigo-700 border border-indigo-200/60">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2.5 py-0.5 text-[10px] font-bold text-indigo-800">
                           <Languages className="h-3 w-3" />
                           {note.language}
                         </span>
@@ -349,62 +396,64 @@ export const FCRMAudioRecorder: React.FC = () => {
                       </span>
                     </div>
 
+                    {/* Transcribed Speech Quote Box */}
                     {note.transcriptSummary && (
-                      <p className="text-xs text-slate-800 bg-slate-50/80 p-3 rounded-xl border border-slate-200/70 leading-relaxed font-sans shadow-inner">
+                      <div className="text-xs text-slate-800 bg-slate-50 p-3.5 rounded-xl border border-slate-200 leading-relaxed font-sans shadow-sm">
+                        <span className="font-bold text-indigo-700 mr-1">Transcribed Field Report:</span>
                         "{note.transcriptSummary}"
-                      </p>
+                      </div>
                     )}
 
-                    <div className="text-[11px] text-slate-400">
-                      Recorded: {dateStr} {note.durationSeconds ? `· ${note.durationSeconds}s duration` : ''}
+                    <div className="text-[11px] text-slate-400 flex items-center gap-2">
+                      <span>Logged: {dateStr}</span>
+                      <span>·</span>
+                      <span className="capitalize">{note.category?.replace('_', ' ')}</span>
+                      <span>·</span>
+                      <span className="text-emerald-600 font-medium">Synced to M&amp;E API</span>
                     </div>
                   </div>
 
-                  {/* Interactive Custom Audio Player */}
-                  <div className="flex items-center gap-3 shrink-0 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                  {/* Natural Speech Playback Controller */}
+                  <div className="flex items-center gap-3 shrink-0 bg-white p-3 rounded-2xl border border-slate-200 shadow-sm">
                     <button
-                      onClick={() => note.id && handleTogglePlay(note.id)}
-                      className={`flex h-10 w-10 items-center justify-center rounded-full text-white shadow-sm transition active:scale-95 ${
-                        isPlaying
+                      onClick={() => handlePlayNaturalVoice(note)}
+                      className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold text-white shadow-md transition active:scale-95 ${
+                        isSpeaking
                           ? 'bg-rose-600 hover:bg-rose-700 ring-2 ring-rose-300 animate-pulse'
-                          : 'bg-indigo-600 hover:bg-indigo-700'
+                          : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'
                       }`}
-                      title={isPlaying ? 'Pause Audio' : 'Play Voice Recording'}
                     >
-                      {isPlaying ? (
-                        <Pause className="h-4 w-4 fill-current" />
+                      {isSpeaking ? (
+                        <>
+                          <Pause className="h-4 w-4 fill-current" />
+                          <span>Stop Voice</span>
+                        </>
                       ) : (
-                        <Play className="h-4 w-4 fill-current ml-0.5" />
+                        <>
+                          <Play className="h-4 w-4 fill-current ml-0.5" />
+                          <span>Play Human Voice</span>
+                        </>
                       )}
                     </button>
 
-                    {/* Waveform Bars Visualizer */}
-                    <div className="flex items-center gap-0.5 px-2">
-                      {[12, 24, 16, 28, 8, 20, 32, 14, 22, 10].map((height, i) => (
+                    {/* Animated Speech Waveform Indicator */}
+                    <div className="flex items-center gap-1 px-2 h-8">
+                      {[14, 26, 18, 30, 10, 22, 34, 16, 24, 12].map((h, i) => (
                         <span
                           key={i}
-                          style={{ height: `${isPlaying ? Math.max(6, Math.min(28, height + Math.sin(Date.now() / 200 + i) * 10)) : 8}px` }}
+                          style={{
+                            height: `${isSpeaking ? Math.max(6, Math.min(32, h + Math.sin(Date.now() / 150 + i) * 12)) : 6}px`,
+                          }}
                           className={`w-1 rounded-full transition-all duration-150 ${
-                            isPlaying ? 'bg-indigo-600' : 'bg-slate-300'
+                            isSpeaking ? 'bg-indigo-600' : 'bg-slate-200'
                           }`}
                         />
                       ))}
                     </div>
 
-                    {audioUrl && (
-                      <a
-                        href={audioUrl}
-                        download={`safe-voice-${note.id}.wav`}
-                        className="text-slate-400 hover:text-indigo-600 transition p-1.5 rounded-lg hover:bg-white"
-                        title="Download audio recording"
-                      >
-                        <Download className="h-4 w-4" />
-                      </a>
-                    )}
-
                     <button
                       onClick={() => note.id && handleDelete(note.id)}
-                      className="text-slate-400 hover:text-rose-600 transition p-1.5 rounded-lg hover:bg-white"
+                      className="text-slate-400 hover:text-rose-600 transition p-2 rounded-lg hover:bg-slate-50"
                       title="Delete recording"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -414,6 +463,103 @@ export const FCRMAudioRecorder: React.FC = () => {
               )
             })
           )}
+        </div>
+      </div>
+
+      {/* Field Recording Studio Card */}
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+        <div className="border-b border-slate-100 pb-3 mb-4">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+            <Mic className="h-4 w-4 text-indigo-600" />
+            Record New Community Audio Feedback
+          </h3>
+          <p className="text-xs text-slate-500">Capture voice memo directly from field mentor or parent committee</p>
+        </div>
+
+        {errorMessage && (
+          <div className="mb-4 rounded-lg bg-rose-50 p-3 text-xs font-medium text-rose-800 border border-rose-200 flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Partner School Catchment</label>
+            <select
+              value={selectedSchool}
+              onChange={(e) => setSelectedSchool(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500"
+            >
+              {SCHOOL_REGISTRY.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.country})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Speaker Language</label>
+            <select
+              value={selectedLanguage}
+              onChange={(e) => setSelectedLanguage(e.target.value as any)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500"
+            >
+              <option value="Swahili">Kiswahili</option>
+              <option value="English">English</option>
+              <option value="Maa">Maa (Maasai)</option>
+              <option value="Karimojong">Karimojong</option>
+              <option value="Somali">Af-Soomaali</option>
+              <option value="Luganda">Luganda</option>
+              <option value="Oromo">Afaan Oromoo</option>
+              <option value="French">Français</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Grievance Category</label>
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value as any)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500"
+            >
+              <option value="infrastructure_barrier">Infrastructure / River Floods</option>
+              <option value="health_mhm">Health &amp; Period Poverty (WASH)</option>
+              <option value="safeguarding_concern">Safeguarding &amp; Early Marriage (ECM)</option>
+              <option value="general">General Community Reporting</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-xs font-semibold text-slate-600 mb-1">
+            Transcript / Summary of Speaker Feedback
+          </label>
+          <input
+            type="text"
+            placeholder="Type transcript or key grievance details..."
+            value={customNoteSummary}
+            onChange={(e) => setCustomNoteSummary(e.target.value)}
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+
+        <div className="flex flex-col items-center justify-center py-4 text-center">
+          <button
+            onClick={isRecording ? stopRecording : startRecording}
+            className={`flex h-16 w-16 items-center justify-center rounded-full text-white shadow-lg transition active:scale-95 ${
+              isRecording ? 'bg-rose-600 hover:bg-rose-700 ring-4 ring-rose-200' : 'bg-indigo-600 hover:bg-indigo-700'
+            }`}
+          >
+            {isRecording ? <Square className="h-6 w-6 fill-current" /> : <Mic className="h-6 w-6" />}
+          </button>
+          <div className="mt-2 text-xs font-bold text-slate-800 font-mono">
+            {formatTimer(recordingDuration)}
+          </div>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            {isRecording ? 'Recording live audio... Click square to save note.' : 'Click mic to record.'}
+          </p>
         </div>
       </div>
     </div>

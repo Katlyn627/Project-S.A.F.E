@@ -1,84 +1,5 @@
 import { db, type Student, type Attendance, type Alert, type VoiceFeedback, type CountryCode } from './schema'
 
-/**
- * Synthesizes a realistic human speech-cadence WAV audio recording with formant filters,
- * pitch modulations, syllable cadence, and field acoustic texture for authentic voice playback.
- */
-const createRealisticSpeechAudioBlob = (
-  basePitch: number = 180,
-  durationSec: number = 5,
-  speakerType: 'male' | 'female' | 'mentor' = 'female'
-): Blob => {
-  const sampleRate = 16000
-  const numSamples = sampleRate * durationSec
-  const buffer = new ArrayBuffer(44 + numSamples * 2) // 16-bit PCM mono
-  const view = new DataView(buffer)
-
-  const writeString = (offset: number, string: string) => {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i))
-    }
-  }
-
-  // RIFF Header
-  writeString(0, 'RIFF')
-  view.setUint32(4, 36 + numSamples * 2, true)
-  writeString(8, 'WAVE')
-  writeString(12, 'fmt ')
-  view.setUint32(16, 16, true) // PCM chunk size
-  view.setUint16(20, 1, true) // Audio format (PCM)
-  view.setUint16(22, 1, true) // Mono
-  view.setUint32(24, sampleRate, true) // Sample rate
-  view.setUint32(28, sampleRate * 2, true) // Byte rate
-  view.setUint16(32, 2, true) // Block align (16-bit mono)
-  view.setUint16(34, 16, true) // Bits per sample
-  writeString(36, 'data')
-  view.setUint32(40, numSamples * 2, true)
-
-  // Speech Formants for authentic vocal tract resonance
-  const f1 = speakerType === 'female' ? 650 : speakerType === 'mentor' ? 550 : 450
-  const f2 = speakerType === 'female' ? 1900 : speakerType === 'mentor' ? 1750 : 1450
-  const f3 = speakerType === 'female' ? 2800 : speakerType === 'mentor' ? 2600 : 2300
-
-  // Generate continuous cadence syllables
-  let phase = 0
-  for (let i = 0; i < numSamples; i++) {
-    const t = i / sampleRate
-
-    // Syllable rhythmic cadence envelope (speech bursts of ~180ms with 40ms micro-pauses)
-    const syllablePhase = (t * 4.2) % 1
-    const syllableEnvelope = Math.sin(Math.PI * Math.min(1, Math.max(0, syllablePhase * 1.25)))
-
-    // Dynamic pitch inflections
-    const pitchJitter = Math.sin(2 * Math.PI * 3.5 * t) * 12
-    const intonation = Math.sin(2 * Math.PI * 0.4 * t) * 20
-    const currentF0 = basePitch + pitchJitter + intonation
-
-    phase += (2 * Math.PI * currentF0) / sampleRate
-
-    // Glottal pulse synthesis (harmonic rich voice source)
-    const glottal = Math.sin(phase) + 0.5 * Math.sin(2 * phase) + 0.3 * Math.sin(3 * phase) + 0.15 * Math.sin(4 * phase)
-
-    // Formant filter resonances
-    const formant1 = Math.sin(2 * Math.PI * f1 * t) * 0.4
-    const formant2 = Math.sin(2 * Math.PI * f2 * t) * 0.25
-    const formant3 = Math.sin(2 * Math.PI * f3 * t) * 0.15
-
-    // Subtle radio transmitter breath / field mic ambient hiss
-    const fieldMicAcoustic = (Math.random() * 2 - 1) * 0.035
-
-    // Combined vocal signal modulated by syllable cadence
-    const sample = (glottal * (0.4 + formant1 + formant2 + formant3) * syllableEnvelope + fieldMicAcoustic) * 0.7
-
-    // Soft clamp and write 16-bit integer
-    const clamped = Math.max(-1, Math.min(1, sample))
-    const int16 = Math.floor(clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff)
-    view.setInt16(44 + i * 2, int16, true)
-  }
-
-  return new Blob([buffer], { type: 'audio/wav' })
-}
-
 export interface SchoolMeta {
   id: string
   name: string
@@ -254,19 +175,18 @@ export const seedMockData = async (force: boolean = false) => {
   await db.attendance.bulkPut(attendanceRecords)
   await db.alerts.bulkPut(alerts)
 
-  // 2. Seed Realistic Multi-Lingual Voice Feedback Recordings with Custom Speech Synthesis
+  // 2. Seed Multi-Lingual Community Voice Feedback across all regional languages
   const voiceNotes: VoiceFeedback[] = [
     {
       id: 1,
       schoolId: 'SCH-KE-NRK-01',
       country: 'Kenya',
       timestamp: '2026-08-31T06:45:00Z',
-      durationSeconds: 6,
-      audioBlob: createRealisticSpeechAudioBlob(130, 6, 'male'),
+      durationSeconds: 12,
       language: 'Maa',
       category: 'infrastructure_barrier',
       status: 'escalated',
-      transcriptSummary: 'Elder Ole Saitoti (Narok / Mara): "Seasonal heavy downpours flooded the Talek river crossing. 16 girls in Grade 7 & 8 are blocked from walking to school until the community wooden footbridge is repaired."',
+      transcriptSummary: 'Elder Ole Saitoti from Enabelbel: Seasonal heavy rainfall has caused the Talek river crossing to overflow. Sixteen adolescent girls in Grade 7 and 8 are unable to walk to class until the footbridge is repaired.',
       synced: 1,
     },
     {
@@ -274,12 +194,11 @@ export const seedMockData = async (force: boolean = false) => {
       schoolId: 'SCH-KE-TRK-02',
       country: 'Kenya',
       timestamp: '2026-08-30T15:20:00Z',
-      durationSeconds: 5,
-      audioBlob: createRealisticSpeechAudioBlob(210, 5, 'mentor'),
+      durationSeconds: 14,
       language: 'Swahili',
       category: 'health_mhm',
       status: 'reviewed',
-      transcriptSummary: 'Community Mentor Amina (Turkana): "Grade 7 girls reported the primary school solar borehole pump is damaged. Girls are trekking 9km to seasonal sand river wells after school, causing morning exhaustion."',
+      transcriptSummary: 'Community Mentor Amina in Kakuma: Wasichana wa Darasa la Saba wameripoti kuwa pampu ya maji ya jua imeharibika. Wanalazimika kutembea kilomita kenda kutafuta maji mtoni, na hii inawafanya wakose masomo ya asubuhi.',
       synced: 1,
     },
     {
@@ -287,12 +206,11 @@ export const seedMockData = async (force: boolean = false) => {
       schoolId: 'SCH-UG-KRM-05',
       country: 'Uganda',
       timestamp: '2026-08-29T11:10:00Z',
-      durationSeconds: 5,
-      audioBlob: createRealisticSpeechAudioBlob(230, 5, 'female'),
+      durationSeconds: 13,
       language: 'Karimojong',
       category: 'safeguarding_concern',
       status: 'escalated',
-      transcriptSummary: 'Mother Lokol (Moroto / Karamoja): "Pastoralist families in Nadunget are planning dry-season livestock migration. We need mobile mentor learning circles so the older daughters do not drop out permanently."',
+      transcriptSummary: 'Mother Lokol in Moroto: Pastoralist families are preparing for seasonal cattle migration. We urgently request mobile mentor circles so that our older daughters do not drop out of school before final examinations.',
       synced: 1,
     },
     {
@@ -300,12 +218,11 @@ export const seedMockData = async (force: boolean = false) => {
       schoolId: 'SCH-TZ-DDM-07',
       country: 'Tanzania',
       timestamp: '2026-08-28T09:30:00Z',
-      durationSeconds: 6,
-      audioBlob: createRealisticSpeechAudioBlob(140, 6, 'male'),
+      durationSeconds: 11,
       language: 'Swahili',
       category: 'health_mhm',
       status: 'reviewed',
-      transcriptSummary: 'Parent Committee Rep (Kondoa / Dodoma): "The dignity kits and AFRIpads distribution has drastically cut monthly absenteeism in standard 7. Girls who used to stay home 4 days a month are now attending all week."',
+      transcriptSummary: 'Mwakilishi wa Wazazi Kondoa: Usambazaji wa vifaa vya usafi na taulo za kike umepunguza utoro kwa asilimia themanini. Wasichana waliokuwa wakikaa nyumbani siku nne kwa mwezi sasa wanahudhuria darasani kila siku.',
       synced: 1,
     },
     {
@@ -313,12 +230,11 @@ export const seedMockData = async (force: boolean = false) => {
       schoolId: 'SCH-KE-KLF-03',
       country: 'Kenya',
       timestamp: '2026-08-27T14:15:00Z',
-      durationSeconds: 5,
-      audioBlob: createRealisticSpeechAudioBlob(215, 5, 'mentor'),
+      durationSeconds: 12,
       language: 'Swahili',
       category: 'safeguarding_concern',
       status: 'escalated',
-      transcriptSummary: 'CPO Joyce (Kilifi / Ganze): "Flagged early engagement risk for two Grade 8 candidates in Sokoke sub-location. Coordinated with Area Chief for child protection dialogue on Friday."',
+      transcriptSummary: 'Afisa wa Kulinda Watoto Joyce huko Ganze: Tumeingilia kati kuzuia ndoa ya mapema kwa wanafunzi wawili wa Darasa la Nane. Chifu na wazee wa kijiji wameweka makubaliano rasmi ya kuhakikisha wasichana wanamaliza masomo.',
       synced: 1,
     },
     {
@@ -326,12 +242,11 @@ export const seedMockData = async (force: boolean = false) => {
       schoolId: 'SCH-UG-WNL-06',
       country: 'Uganda',
       timestamp: '2026-08-26T16:00:00Z',
-      durationSeconds: 5,
-      audioBlob: createRealisticSpeechAudioBlob(205, 5, 'female'),
+      durationSeconds: 11,
       language: 'English',
       category: 'general',
       status: 'reviewed',
-      transcriptSummary: 'Head Teacher Grace (Rhino Camp / West Nile): "Solar study lamps distributed to 40 exam candidates have enabled evening peer study groups across settlement zones."',
+      transcriptSummary: 'Head Teacher Grace at Rhino Camp: The solar study lamps and evening remedial peer circles have enabled forty-five girls in candidate classes to study safely after sunset without household disruptions.',
       synced: 1,
     },
     {
@@ -339,12 +254,11 @@ export const seedMockData = async (force: boolean = false) => {
       schoolId: 'SCH-TZ-SHY-08',
       country: 'Tanzania',
       timestamp: '2026-08-25T10:45:00Z',
-      durationSeconds: 5,
-      audioBlob: createRealisticSpeechAudioBlob(220, 5, 'mentor'),
+      durationSeconds: 10,
       language: 'Swahili',
       category: 'infrastructure_barrier',
       status: 'reviewed',
-      transcriptSummary: 'Mentor Maria (Shinyanga): "Community walking bus groups from Solwa have safely escorted 24 female students through rural transit paths with zero harassment incidents this month."',
+      transcriptSummary: 'Mlezi Maria huko Shinyanga: Vikundi vya kutembea pamoja kwa usalama vimewasindikiza wasichana ishirini na wanne shuleni bila hofu yoyote ya usalama kwenye njia ndefu za vijijini.',
       synced: 1,
     },
     {
@@ -352,16 +266,15 @@ export const seedMockData = async (force: boolean = false) => {
       schoolId: 'SCH-KE-GRS-04',
       country: 'Kenya',
       timestamp: '2026-08-24T08:10:00Z',
-      durationSeconds: 6,
-      audioBlob: createRealisticSpeechAudioBlob(135, 6, 'male'),
+      durationSeconds: 12,
       language: 'Somali',
       category: 'general',
       status: 'reviewed',
-      transcriptSummary: 'Elder Abdi (Dadaab / Garissa): "Midday school porridge feeding support has stabilized morning attendance in Standard 6 and 7 during the current dry spell."',
+      transcriptSummary: 'Elder Abdi in Dadaab: Barnaamijka quraacda dugsiga iyo buugaagta cusub waxay si weyn u caawiyeen in gabdhaha fasalka lixaad iyo toddobaad ay si buuxda ugu soo xaadiraan casharada subaxii.',
       synced: 1,
     },
   ]
 
   await db.voiceFeedback.bulkPut(voiceNotes)
-  console.log('Project S.A.F.E. Enterprise Dataset with authentic vocal synthesized speech audio loaded.')
+  console.log('Project S.A.F.E. Enterprise Dataset with authentic multi-lingual transcripts loaded.')
 }
