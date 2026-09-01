@@ -23,6 +23,24 @@ app.use('/uploads', express.static(path.resolve('uploads')))
 app.use('/api/v1/sync', syncRoutes)
 app.use('/api/v1/telemetry', telemetryRoutes)
 
+// Root API Welcome & Overview
+app.get('/', (_req, res) => {
+  res.json({
+    project: 'Project S.A.F.E. (School Attendance & Foundational Empowerment)',
+    role: 'Central Aggregation & Telemetry API',
+    status: 'online',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      telemetryStats: '/api/v1/telemetry/stats',
+      syncBatch: 'POST /api/v1/sync/batch',
+      syncVoice: 'POST /api/v1/sync/voice',
+    },
+    documentation: 'https://github.com/Katlyn627/Project-S.A.F.E',
+    timestamp: new Date().toISOString(),
+  })
+})
+
 // Health Check
 app.get('/health', (_req, res) => {
   res.json({
@@ -38,4 +56,3 @@ app.listen(PORT, async () => {
   console.log(`Project S.A.F.E. Ingestion API listening on port ${PORT}`)
   await initDatabase()
 })
-
