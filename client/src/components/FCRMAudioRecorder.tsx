@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type VoiceFeedback } from '../db/schema'
-import { SCHOOL_REGISTRY } from '../db/seed'
+import { db, type VoiceFeedback, type LanguageCode } from '../db/schema'
+import { TOP_25_COUNTRIES_REGISTRY } from '../db/seed'
 import {
   Mic,
   Square,
@@ -16,7 +16,6 @@ import {
   CheckCircle2,
   Sliders,
   Filter,
-  Sparkles,
   BookOpen,
 } from 'lucide-react'
 
@@ -26,12 +25,12 @@ export const FCRMAudioRecorder: React.FC = () => {
   const [filterLanguage, setFilterLanguage] = useState<string>('all')
   const [filterCountry, setFilterCountry] = useState<string>('all')
   const [filterCategory, setFilterCategory] = useState<string>('all')
-  const [selectedSchool, setSelectedSchool] = useState<string>('SCH-KE-NRK-01')
-  const [selectedLanguage, setSelectedLanguage] = useState<'Swahili' | 'English' | 'Maa' | 'Karimojong' | 'Somali' | 'Luganda' | 'Oromo' | 'French'>('Swahili')
-  const [selectedCategory, setSelectedCategory] = useState<'infrastructure_barrier' | 'safeguarding_concern' | 'health_mhm' | 'general'>('infrastructure_barrier')
+  const [selectedSchool, setSelectedSchool] = useState<string>('SCH-SSD-01')
+  const [selectedLanguage, setSelectedLanguage] = useState<LanguageCode>('English')
+  const [selectedCategory, setSelectedCategory] = useState<'infrastructure_barrier' | 'safeguarding_concern' | 'health_mhm' | 'general' | 'displacement'>('infrastructure_barrier')
   const [customNoteSummary, setCustomNoteSummary] = useState<string>('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  
+
   // Real Human Speech Synthesis State
   const [speakingId, setSpeakingId] = useState<number | null>(null)
   const [speechRate, setSpeechRate] = useState<number>(0.95)
@@ -105,19 +104,21 @@ export const FCRMAudioRecorder: React.FC = () => {
     const lang = note.language || 'English'
     let preferredVoice: SpeechSynthesisVoice | undefined
 
-    if (lang === 'Swahili' || lang === 'Maa') {
+    if (lang === 'French') {
+      preferredVoice = availableVoices.find((v) => v.lang.startsWith('fr'))
+    } else if (lang === 'Arabic') {
+      preferredVoice = availableVoices.find((v) => v.lang.startsWith('ar'))
+    } else if (lang === 'Portuguese') {
+      preferredVoice = availableVoices.find((v) => v.lang.startsWith('pt'))
+    } else if (lang === 'Urdu') {
+      preferredVoice = availableVoices.find((v) => v.lang.startsWith('ur') || v.lang.startsWith('hi'))
+    } else if (lang === 'Swahili' || lang === 'Maa') {
       preferredVoice = availableVoices.find(
         (v) => v.lang.startsWith('sw') || v.lang.startsWith('en-KE') || v.lang.startsWith('en-ZA') || v.name.toLowerCase().includes('kenya') || v.name.toLowerCase().includes('african')
       )
-    } else if (lang === 'French') {
-      preferredVoice = availableVoices.find((v) => v.lang.startsWith('fr'))
-    } else if (lang === 'Somali' || lang === 'Oromo' || lang === 'Karimojong') {
-      preferredVoice = availableVoices.find(
-        (v) => v.lang.startsWith('en-KE') || v.lang.startsWith('en-NG') || v.lang.startsWith('en-ZA') || v.lang.startsWith('ar')
-      )
     } else {
       preferredVoice = availableVoices.find(
-        (v) => v.lang.startsWith('en-KE') || v.lang.startsWith('en-GB') || v.lang.startsWith('en-US')
+        (v) => v.lang.startsWith('en-KE') || v.lang.startsWith('en-GB') || v.lang.startsWith('en-US') || v.lang.startsWith('en-NG')
       )
     }
 
@@ -159,11 +160,12 @@ export const FCRMAudioRecorder: React.FC = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
         stream.getTracks().forEach((track) => track.stop())
 
-        const schoolMeta = SCHOOL_REGISTRY.find((s) => s.id === selectedSchool)
+        const schoolMeta = TOP_25_COUNTRIES_REGISTRY.find((s) => s.id === selectedSchool)
 
         await db.voiceFeedback.add({
           schoolId: selectedSchool,
-          country: schoolMeta?.country || 'Kenya',
+          country: schoolMeta?.country || 'South Sudan',
+          countryFlag: schoolMeta?.countryFlag || '🇸🇸',
           timestamp: new Date().toISOString(),
           audioBlob,
           durationSeconds: recordingDuration,
@@ -228,15 +230,15 @@ export const FCRMAudioRecorder: React.FC = () => {
                 UNESCO HerAtlas Aligned
               </span>
               <span className="text-xs font-semibold text-slate-500">
-                FCRM Community Voice Feedback &amp; Grievance Redress
+                FCRM Global Voice Feedback &amp; Grievance Redress (Top 25 Nations)
               </span>
             </div>
             <h2 className="text-lg font-bold text-slate-900 mt-1 flex items-center gap-2">
               <Volume2 className="h-5 w-5 text-indigo-600" />
-              Regional Multi-Lingual Audio Voice Ledger
+              Global Multi-Lingual Audio Voice Ledger
             </h2>
             <p className="text-xs text-slate-600 mt-0.5 max-w-2xl leading-relaxed">
-              Enables low-literacy pastoralist elders, mothers, and community mentors to submit audio feedback without barriers. Click <strong>Play Human Voice</strong> to hear natural speech narration in regional dialects.
+              Enables low-literacy pastoralist elders, mothers, and community mentors across 25 developing nations to submit audio feedback without barriers. Click <strong>Play Human Voice</strong> to hear natural speech narration.
             </p>
           </div>
 
@@ -263,12 +265,12 @@ export const FCRMAudioRecorder: React.FC = () => {
         </div>
       </div>
 
-      {/* Multi-Language Filter Bar */}
+      {/* Multi-Language & Country Filter Bar */}
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center gap-2 font-bold text-xs uppercase tracking-wider text-slate-700">
             <Filter className="h-4 w-4 text-indigo-600" />
-            <span>Filter by Region &amp; Dialect:</span>
+            <span>Filter Global Feedback:</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -280,34 +282,39 @@ export const FCRMAudioRecorder: React.FC = () => {
               <select
                 value={filterLanguage}
                 onChange={(e) => setFilterLanguage(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none shadow-sm"
+                className="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none shadow-sm"
               >
-                <option value="all">All Regional Languages (8 Dialects)</option>
-                <option value="Swahili">Kiswahili (East African Lingua Franca)</option>
-                <option value="English">English (Regional Standard)</option>
-                <option value="Maa">Maa (Maasai / Samburu Pastoralist)</option>
-                <option value="Karimojong">Karimojong (Karamoja Agro-Pastoral)</option>
-                <option value="Somali">Af-Soomaali (Garissa / Horn of Africa)</option>
-                <option value="Luganda">Luganda (Central / Southern Uganda)</option>
-                <option value="Oromo">Afaan Oromoo (Border Pastoralist)</option>
-                <option value="French">Français (DRC / Rwanda Border)</option>
+                <option value="all">All Languages &amp; Dialects</option>
+                <option value="English">English (Global Humanitarian Standard)</option>
+                <option value="French">Français (Chad / Mali / CAR / Guinea / DRC)</option>
+                <option value="Arabic">Arabic (Yemen / Sudan / Horn)</option>
+                <option value="Swahili">Kiswahili (Kenya / Tanzania / Uganda)</option>
+                <option value="Hausa">Hausa (Nigeria / Niger)</option>
+                <option value="Somali">Af-Soomaali (Somalia / Garissa)</option>
+                <option value="Dari">Dari / Pashto (Afghanistan)</option>
+                <option value="Urdu">Urdu (Pakistan)</option>
+                <option value="Portuguese">Português (Mozambique)</option>
+                <option value="Karimojong">Karimojong (Uganda Karamoja)</option>
+                <option value="Nepali">Nepali (Nepal)</option>
               </select>
             </div>
 
             {/* Country Filter */}
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
-                <Globe2 className="h-3 w-3 text-indigo-600" /> Country Jurisdiction
+                <Globe2 className="h-3 w-3 text-indigo-600" /> Country (Top 25)
               </label>
               <select
                 value={filterCountry}
                 onChange={(e) => setFilterCountry(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none shadow-sm"
+                className="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none shadow-sm"
               >
-                <option value="all">All Countries (🇰🇪 🇺🇬 🇹🇿)</option>
-                <option value="Kenya">Kenya (🇰🇪)</option>
-                <option value="Uganda">Uganda (🇺🇬)</option>
-                <option value="Tanzania">Tanzania (🇹🇿)</option>
+                <option value="all">All 25 Priority Countries</option>
+                {TOP_25_COUNTRIES_REGISTRY.map((c) => (
+                  <option key={c.id} value={c.country}>
+                    {c.countryFlag} {c.country}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -319,12 +326,13 @@ export const FCRMAudioRecorder: React.FC = () => {
               <select
                 value={filterCategory}
                 onChange={(e) => setFilterCategory(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none shadow-sm"
+                className="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none shadow-sm"
               >
                 <option value="all">All Categories</option>
-                <option value="infrastructure_barrier">Infrastructure / River Floods</option>
+                <option value="infrastructure_barrier">Infrastructure / Flash Flooding</option>
                 <option value="health_mhm">Health &amp; Period Poverty (WASH)</option>
                 <option value="safeguarding_concern">Safeguarding &amp; Child Marriage (ECM)</option>
+                <option value="displacement">Conflict &amp; Displacement Transit</option>
                 <option value="general">General Community Reporting</option>
               </select>
             </div>
@@ -338,15 +346,15 @@ export const FCRMAudioRecorder: React.FC = () => {
           <div>
             <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-indigo-600" />
-              Community Voice Notes ({filteredVoiceNotes.length} Transcribed Field Memos)
+              Global Voice Notes ({filteredVoiceNotes.length} Transcribed Field Memos)
             </h3>
             <p className="text-xs text-slate-500">
-              High-fidelity voice playback powered by natural human speech synthesis
+              High-fidelity voice playback powered by natural human speech synthesis across 25 nations
             </p>
           </div>
           <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-700 border border-emerald-200/60 flex items-center gap-1">
             <CheckCircle2 className="h-3.5 w-3.5" />
-            Human Voice Active
+            Human Voice Engine Active
           </span>
         </div>
 
@@ -374,7 +382,7 @@ export const FCRMAudioRecorder: React.FC = () => {
                       </span>
                       {note.country && (
                         <span className="rounded bg-slate-200 px-2.5 py-0.5 text-[10px] font-bold text-slate-800">
-                          {note.country}
+                          {note.countryFlag} {note.country}
                         </span>
                       )}
                       {note.language && (
@@ -485,15 +493,15 @@ export const FCRMAudioRecorder: React.FC = () => {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Partner School Catchment</label>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Partner School Catchment (25 Countries)</label>
             <select
               value={selectedSchool}
               onChange={(e) => setSelectedSchool(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500"
+              className="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500"
             >
-              {SCHOOL_REGISTRY.map((s) => (
+              {TOP_25_COUNTRIES_REGISTRY.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name} ({s.country})
+                  {s.countryFlag} {s.name} ({s.country})
                 </option>
               ))}
             </select>
@@ -504,16 +512,19 @@ export const FCRMAudioRecorder: React.FC = () => {
             <select
               value={selectedLanguage}
               onChange={(e) => setSelectedLanguage(e.target.value as any)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500"
+              className="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500"
             >
-              <option value="Swahili">Kiswahili</option>
               <option value="English">English</option>
-              <option value="Maa">Maa (Maasai)</option>
-              <option value="Karimojong">Karimojong</option>
-              <option value="Somali">Af-Soomaali</option>
-              <option value="Luganda">Luganda</option>
-              <option value="Oromo">Afaan Oromoo</option>
               <option value="French">Français</option>
+              <option value="Arabic">Arabic</option>
+              <option value="Swahili">Kiswahili</option>
+              <option value="Hausa">Hausa</option>
+              <option value="Somali">Af-Soomaali</option>
+              <option value="Dari">Dari</option>
+              <option value="Urdu">Urdu</option>
+              <option value="Portuguese">Português</option>
+              <option value="Karimojong">Karimojong</option>
+              <option value="Nepali">Nepali</option>
             </select>
           </div>
 
@@ -522,11 +533,12 @@ export const FCRMAudioRecorder: React.FC = () => {
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value as any)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500"
+              className="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500"
             >
               <option value="infrastructure_barrier">Infrastructure / River Floods</option>
               <option value="health_mhm">Health &amp; Period Poverty (WASH)</option>
               <option value="safeguarding_concern">Safeguarding &amp; Early Marriage (ECM)</option>
+              <option value="displacement">Conflict &amp; Displacement Transit</option>
               <option value="general">General Community Reporting</option>
             </select>
           </div>
