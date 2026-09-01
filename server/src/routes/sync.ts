@@ -49,6 +49,11 @@ router.post('/batch', async (req: Request, res: Response): Promise<void> => {
 
     // 1. Process Attendance logs
     for (const record of attendance) {
+      // Derive school ID and grade from UID format SAFE-KE-NRK-0601
+      const uidParts = record.studentUid.split('-')
+      const derivedSchoolId = uidParts.length >= 3 ? `SCH-${uidParts[1]}-${uidParts[2]}-01` : 'SCH-KE-NRK-01'
+      const derivedGrade = uidParts.length >= 4 && uidParts[3].startsWith('06') ? 6 : uidParts.length >= 4 && uidParts[3].startsWith('07') ? 7 : 8
+
       // Ensure student exists in server registry
       await client.query(
         `
@@ -56,7 +61,7 @@ router.post('/batch', async (req: Request, res: Response): Promise<void> => {
         VALUES ($1, $2, $3, $4)
         ON CONFLICT (uid) DO NOTHING;
       `,
-        [record.studentUid, 'SCH-MARA-01', 8, 'active']
+        [record.studentUid, derivedSchoolId, derivedGrade, 'active']
       )
 
       await client.query(

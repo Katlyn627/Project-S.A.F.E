@@ -1,12 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type VoiceFeedback } from '../db/schema'
-import { Mic, Square, Volume2, Trash2, AlertCircle, MessageSquare, AlertOctagon } from 'lucide-react'
+import { db, type VoiceFeedback, type CountryCode } from '../db/schema'
+import { SCHOOL_REGISTRY } from '../db/seed'
+import {
+  Mic,
+  Square,
+  Volume2,
+  Trash2,
+  AlertCircle,
+  MessageSquare,
+  Globe2,
+  Languages,
+} from 'lucide-react'
 
 export const FCRMAudioRecorder: React.FC = () => {
   const [isRecording, setIsRecording] = useState<boolean>(false)
   const [recordingDuration, setRecordingDuration] = useState<number>(0)
-  const [selectedSchool, setSelectedSchool] = useState<string>('SCH-NAROK-01')
+  const [selectedCountry, setSelectedCountry] = useState<string>('all')
+  const [selectedSchool, setSelectedSchool] = useState<string>('SCH-KE-NRK-01')
+  const [selectedLanguage, setSelectedLanguage] = useState<'Swahili' | 'English' | 'Maa' | 'Karimojong' | 'Somali'>('Swahili')
   const [selectedCategory, setSelectedCategory] = useState<'infrastructure_barrier' | 'safeguarding_concern' | 'health_mhm' | 'general'>('infrastructure_barrier')
   const [customNoteSummary, setCustomNoteSummary] = useState<string>('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -16,11 +28,20 @@ export const FCRMAudioRecorder: React.FC = () => {
   const audioChunksRef = useRef<Blob[]>([])
   const timerRef = useRef<any>(null)
 
+  const availableSchools = SCHOOL_REGISTRY.filter(
+    (s) => selectedCountry === 'all' || s.country === selectedCountry
+  )
+
   // Fetch all voice notes from Dexie
   const voiceNotes = useLiveQuery(
     () => db.voiceFeedback.orderBy('timestamp').reverse().toArray(),
     []
   ) ?? []
+
+  const filteredVoiceNotes = voiceNotes.filter((note) => {
+    if (selectedCountry === 'all') return true
+    return note.country === selectedCountry
+  })
 
   // Create temporary object URLs for audio playback safely
   useEffect(() => {
@@ -64,13 +85,17 @@ export const FCRMAudioRecorder: React.FC = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
         stream.getTracks().forEach((track) => track.stop())
 
+        const schoolMeta = SCHOOL_REGISTRY.find((s) => s.id === selectedSchool)
+
         await db.voiceFeedback.add({
           schoolId: selectedSchool,
+          country: schoolMeta?.country || 'Kenya',
           timestamp: new Date().toISOString(),
           audioBlob,
           durationSeconds: recordingDuration,
           category: selectedCategory,
-          transcriptSummary: customNoteSummary || 'Field audio feedback recorded by local community mentor / parent.',
+          language: selectedLanguage,
+          transcriptSummary: customNoteSummary || 'Field audio feedback recorded by local community elder / parent representative.',
           status: 'pending',
           synced: 0,
         })
@@ -122,34 +147,52 @@ export const FCRMAudioRecorder: React.FC = () => {
           <div>
             <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
               <Volume2 className="h-5 w-5 text-indigo-600" />
-              FCRM Community Voice Feedback Module
+              FCRM Regional Voice Feedback Module
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Accessible audio reporting & feedback mechanism for low-literacy parents and community elders
+              Accessible multi-lingual audio reporting for low-literacy parents and pastoralist community elders
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <select
-              value={selectedSchool}
-              onChange={(e) => setSelectedSchool(e.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
+              value={selectedCountry}
+              onChange={(e) => {
+                const c = e.target.value
+                setSelectedCountry(c)
+                const first = SCHOOL_REGISTRY.find((s) => c === 'all' || s.country === c)
+                if (first) setSelectedSchool(first.id)
+              }}
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
             >
-              <option value="SCH-NAROK-01">Narok (SCH-NAROK-01)</option>
-              <option value="SCH-TURK-02">Turkana (SCH-TURK-02)</option>
-              <option value="SCH-KILIFI-03">Kilifi (SCH-KILIFI-03)</option>
-              <option value="SCH-GARISSA-04">Garissa (SCH-GARISSA-04)</option>
+              <option value="all">All Countries</option>
+              <option value="Kenya">Kenya (🇰🇪)</option>
+              <option value="Uganda">Uganda (🇺🇬)</option>
+              <option value="Tanzania">Tanzania (🇹🇿)</option>
             </select>
 
             <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value as any)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
+              value={selectedSchool}
+              onChange={(e) => setSelectedSchool(e.target.value)}
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
             >
-              <option value="infrastructure_barrier">Infrastructure / River Barrier</option>
-              <option value="health_mhm">Health & Sanitation (MHM / WASH)</option>
-              <option value="safeguarding_concern">Safeguarding / Early Marriage</option>
-              <option value="general">General Community Feedback</option>
+              {availableSchools.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={selectedLanguage}
+              onChange={(e) => setSelectedLanguage(e.target.value as any)}
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="Swahili">Kiswahili</option>
+              <option value="English">English</option>
+              <option value="Maa">Maa (Maasai)</option>
+              <option value="Karimojong">Karimojong</option>
+              <option value="Somali">Af-Soomaali</option>
             </select>
           </div>
         </div>
@@ -200,22 +243,22 @@ export const FCRMAudioRecorder: React.FC = () => {
           <div>
             <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-indigo-600" />
-              Community Safeguarding Audio Ledger ({voiceNotes.length})
+              Regional Safeguarding Audio Ledger ({filteredVoiceNotes.length})
             </h3>
-            <p className="text-xs text-slate-500">Transcribed community feedback & complaint mechanisms</p>
+            <p className="text-xs text-slate-500">Transcribed community feedback across Kenya, Uganda, and Tanzania</p>
           </div>
           <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
-            Encrypted Offline Store
+            Encrypted Audio Store
           </span>
         </div>
 
         <div className="mt-4 divide-y divide-slate-100">
-          {voiceNotes.length === 0 ? (
+          {filteredVoiceNotes.length === 0 ? (
             <div className="py-8 text-center text-xs text-slate-400">
-              No voice notes recorded yet. Record one above to test.
+              No voice notes found for this filter.
             </div>
           ) : (
-            voiceNotes.map((note: VoiceFeedback) => {
+            filteredVoiceNotes.map((note: VoiceFeedback) => {
               const audioUrl = note.id ? playbackUrls[note.id] : null
               const dateStr = new Date(note.timestamp).toLocaleString()
 
@@ -226,6 +269,17 @@ export const FCRMAudioRecorder: React.FC = () => {
                       <span className="font-mono text-xs font-bold text-slate-900">
                         {note.schoolId} · Note #{note.id}
                       </span>
+                      {note.country && (
+                        <span className="rounded bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">
+                          {note.country}
+                        </span>
+                      )}
+                      {note.language && (
+                        <span className="inline-flex items-center gap-1 rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700 border border-indigo-100">
+                          <Languages className="h-3 w-3" />
+                          {note.language}
+                        </span>
+                      )}
                       <span
                         className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
                           note.status === 'escalated'
@@ -237,11 +291,6 @@ export const FCRMAudioRecorder: React.FC = () => {
                       >
                         {note.status}
                       </span>
-                      {note.category && (
-                        <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600">
-                          {note.category.replace('_', ' ')}
-                        </span>
-                      )}
                       <span
                         className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                           note.synced === 1

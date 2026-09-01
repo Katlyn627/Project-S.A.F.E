@@ -1,7 +1,18 @@
 import React, { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Alert, type AlertStatus } from '../db/schema'
-import { AlertTriangle, ShieldCheck, Clock, FileText, Save, School, Shield, Sparkles } from 'lucide-react'
+import { SCHOOL_REGISTRY } from '../db/seed'
+import {
+  AlertTriangle,
+  ShieldCheck,
+  Clock,
+  FileText,
+  Save,
+  School,
+  Shield,
+  Sparkles,
+  Globe2,
+} from 'lucide-react'
 
 const INTERVENTION_PRESETS: Record<string, string> = {
   walking_bus: 'Assigned student to verified community walking bus group with 5 peers and reflective safety sash.',
@@ -9,15 +20,21 @@ const INTERVENTION_PRESETS: Record<string, string> = {
   home_visit: 'Conducted elder and guardian home-visit dialogue. Guardian reaffirmed schooling commitment contract.',
   feeding_program: 'Enrolled household into school emergency feeding & daily midday meal program.',
   remedial_tutoring: 'Enrolled student in Saturday peer-tutoring study circle with solar study lamp provision.',
+  borehole_water: 'Enrolled household in school-community solar borehole priority water collection voucher scheme.',
 }
 
 export const CaseworkAlerts: React.FC = () => {
-  const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [filterCountry, setFilterCountry] = useState<string>('all')
   const [filterSchool, setFilterSchool] = useState<string>('all')
+  const [filterStatus, setFilterStatus] = useState<string>('all')
   const [editingAlertId, setEditingAlertId] = useState<number | null>(null)
   const [interventionNote, setInterventionNote] = useState<string>('')
   const [selectedStatus, setSelectedStatus] = useState<AlertStatus>('investigating')
   const [selectedPreset, setSelectedPreset] = useState<string>('walking_bus')
+
+  const availableSchools = SCHOOL_REGISTRY.filter(
+    (s) => filterCountry === 'all' || s.country === filterCountry
+  )
 
   const alerts = useLiveQuery(
     () => db.alerts.orderBy('triggeredDate').reverse().toArray(),
@@ -25,9 +42,10 @@ export const CaseworkAlerts: React.FC = () => {
   ) ?? []
 
   const filteredAlerts = alerts.filter((alert) => {
-    const matchesStatus = filterStatus === 'all' || alert.status === filterStatus
+    const matchesCountry = filterCountry === 'all' || alert.country === filterCountry
     const matchesSchool = filterSchool === 'all' || alert.schoolId === filterSchool
-    return matchesStatus && matchesSchool
+    const matchesStatus = filterStatus === 'all' || alert.status === filterStatus
+    return matchesCountry && matchesSchool && matchesStatus
   })
 
   const openCount = alerts.filter((a) => a.status === 'open').length
@@ -77,18 +95,18 @@ export const CaseworkAlerts: React.FC = () => {
             <AlertTriangle className="h-4 w-4 text-rose-600" />
           </div>
           <p className="mt-2 text-2xl font-bold text-rose-900">{openCount}</p>
-          <p className="text-[11px] text-rose-600 mt-1">Requires immediate mentor home-visit</p>
+          <p className="text-[11px] text-rose-600 mt-1">Immediate caseworker home-visit dispatched</p>
         </div>
 
         <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-amber-700">
-              Under Investigation
+              Under Active Casework
             </span>
             <Clock className="h-4 w-4 text-amber-600" />
           </div>
           <p className="mt-2 text-2xl font-bold text-amber-900">{investigatingCount}</p>
-          <p className="text-[11px] text-amber-600 mt-1">Action plan in progress</p>
+          <p className="text-[11px] text-amber-600 mt-1">Mentor remediation plan in progress</p>
         </div>
 
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 shadow-sm">
@@ -99,35 +117,50 @@ export const CaseworkAlerts: React.FC = () => {
             <ShieldCheck className="h-4 w-4 text-emerald-600" />
           </div>
           <p className="mt-2 text-2xl font-bold text-emerald-900">{resolvedCount}</p>
-          <p className="text-[11px] text-emerald-600 mt-1">85% Target Retention Achieved</p>
+          <p className="text-[11px] text-emerald-600 mt-1">85% Remediation Benchmark Met</p>
         </div>
       </div>
 
       {/* Alerts List Container */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
           <div>
             <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
               <ShieldCheck className="h-5 w-5 text-indigo-600" />
-              Early-Warning Casework Pipeline
+              Regional Early-Warning Casework Pipeline
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Decentralized caseworker triage for adolescent female students at risk of dropout
+              Decentralized caseworker triage for adolescent female students across 3 East African countries
             </p>
           </div>
 
-          {/* Filter Controls */}
+          {/* Multi-tier Filter Controls */}
           <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={filterCountry}
+              onChange={(e) => {
+                setFilterCountry(e.target.value)
+                setFilterSchool('all')
+              }}
+              className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="all">All Countries (🇰🇪 🇺🇬 🇹🇿)</option>
+              <option value="Kenya">Kenya (🇰🇪)</option>
+              <option value="Uganda">Uganda (🇺🇬)</option>
+              <option value="Tanzania">Tanzania (🇹🇿)</option>
+            </select>
+
             <select
               value={filterSchool}
               onChange={(e) => setFilterSchool(e.target.value)}
               className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none"
             >
-              <option value="all">All Partner Schools</option>
-              <option value="SCH-NAROK-01">Narok (SCH-NAROK-01)</option>
-              <option value="SCH-TURK-02">Turkana (SCH-TURK-02)</option>
-              <option value="SCH-KILIFI-03">Kilifi (SCH-KILIFI-03)</option>
-              <option value="SCH-GARISSA-04">Garissa (SCH-GARISSA-04)</option>
+              <option value="all">All 8 Partner Schools</option>
+              {availableSchools.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
             </select>
 
             <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs font-medium">
@@ -171,7 +204,7 @@ export const CaseworkAlerts: React.FC = () => {
         <div className="mt-4 space-y-4">
           {filteredAlerts.length === 0 ? (
             <div className="py-12 text-center text-xs text-slate-400">
-              No casework alerts match the selected filter.
+              No casework alerts match the selected filters.
             </div>
           ) : (
             filteredAlerts.map((alert: Alert) => {
@@ -204,6 +237,11 @@ export const CaseworkAlerts: React.FC = () => {
                       >
                         {alert.status}
                       </span>
+                      {alert.country && (
+                        <span className="rounded-full bg-slate-200/80 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                          {alert.country}
+                        </span>
+                      )}
                       {alert.schoolId && (
                         <span className="flex items-center gap-1 font-mono text-xs text-slate-500">
                           <School className="h-3 w-3" />
@@ -211,7 +249,7 @@ export const CaseworkAlerts: React.FC = () => {
                         </span>
                       )}
                       {alert.rootCause && (
-                        <span className="rounded-full bg-slate-200/80 px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700 border border-indigo-100">
                           {alert.rootCause}
                         </span>
                       )}
@@ -233,16 +271,16 @@ export const CaseworkAlerts: React.FC = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
                             <label className="block text-xs font-semibold text-slate-600 mb-1">
-                              Casework Status
+                              Casework Remediation Stage
                             </label>
                             <select
                               value={selectedStatus}
                               onChange={(e) => setSelectedStatus(e.target.value as AlertStatus)}
                               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500"
                             >
-                              <option value="open">Open (Active Risk Alert)</option>
-                              <option value="investigating">Investigating (Mentor Dispatched)</option>
-                              <option value="resolved">Resolved (Remediated & Re-Enrolled)</option>
+                              <option value="open">Open (Active Risk Alert - &lt;72h Target)</option>
+                              <option value="investigating">Investigating (Mentor Action Plan Deployed)</option>
+                              <option value="resolved">Resolved (Remediated &amp; Re-Enrolled)</option>
                             </select>
                           </div>
 
@@ -256,18 +294,19 @@ export const CaseworkAlerts: React.FC = () => {
                               onChange={(e) => handleApplyPreset(e.target.value)}
                               className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500"
                             >
-                              <option value="walking_bus">Walking Bus Group Assignment</option>
-                              <option value="dignity_kit">MHM Dignity Kit & WASH Support</option>
-                              <option value="home_visit">Elder & Guardian Dialogue</option>
-                              <option value="feeding_program">Emergency Feeding Enrollment</option>
-                              <option value="remedial_tutoring">Remedial Circle & Solar Lamp</option>
+                              <option value="walking_bus">Walking Bus Group Escort (Flood/Commute)</option>
+                              <option value="dignity_kit">MHM Dignity Kit &amp; WASH Voucher (AFRIpads)</option>
+                              <option value="home_visit">Elder &amp; Guardian Dialogue (Early Marriage/ECM)</option>
+                              <option value="feeding_program">Emergency School Feeding Enrollment</option>
+                              <option value="remedial_tutoring">Remedial Circle &amp; Solar Study Lamp</option>
+                              <option value="borehole_water">Solar Borehole Water Priority Voucher</option>
                             </select>
                           </div>
                         </div>
 
                         <div>
                           <label className="block text-xs font-semibold text-slate-600 mb-1">
-                            Intervention Notes & Remediation Action Plan
+                            Intervention Notes &amp; Remediation Action Plan
                           </label>
                           <textarea
                             value={interventionNote}
@@ -283,7 +322,7 @@ export const CaseworkAlerts: React.FC = () => {
                             onClick={() => alert.id && handleSaveCasework(alert.id, alert.studentUid)}
                             className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 transition"
                           >
-                            <Save className="h-3.5 w-3.5" /> Save Casework
+                            <Save className="h-3.5 w-3.5" /> Save Casework Record
                           </button>
                           <button
                             onClick={() => setEditingAlertId(null)}
@@ -306,7 +345,7 @@ export const CaseworkAlerts: React.FC = () => {
                             {alert.assignedMentor && (
                               <span className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-500 mt-1">
                                 <Shield className="h-3 w-3 text-indigo-500" />
-                                Assigned Caseworker: {alert.assignedMentor}
+                                Assigned Lead Mentor: {alert.assignedMentor}
                               </span>
                             )}
                           </div>
