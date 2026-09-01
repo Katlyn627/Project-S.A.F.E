@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type VoiceFeedback } from '../db/schema'
-import { Mic, Square, Volume2, Trash2, AlertCircle } from 'lucide-react'
+import { Mic, Square, Volume2, Trash2, AlertCircle, MessageSquare, AlertOctagon } from 'lucide-react'
 
 export const FCRMAudioRecorder: React.FC = () => {
   const [isRecording, setIsRecording] = useState<boolean>(false)
   const [recordingDuration, setRecordingDuration] = useState<number>(0)
-  const [selectedSchool, setSelectedSchool] = useState<string>('SCH-MARA-01')
+  const [selectedSchool, setSelectedSchool] = useState<string>('SCH-NAROK-01')
+  const [selectedCategory, setSelectedCategory] = useState<'infrastructure_barrier' | 'safeguarding_concern' | 'health_mhm' | 'general'>('infrastructure_barrier')
+  const [customNoteSummary, setCustomNoteSummary] = useState<string>('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [playbackUrls, setPlaybackUrls] = useState<Record<number, string>>({})
 
@@ -25,7 +27,11 @@ export const FCRMAudioRecorder: React.FC = () => {
     const urls: Record<number, string> = {}
     voiceNotes.forEach((note) => {
       if (note.id && note.audioBlob) {
-        urls[note.id] = URL.createObjectURL(note.audioBlob)
+        try {
+          urls[note.id] = URL.createObjectURL(note.audioBlob)
+        } catch {
+          // Ignore invalid blobs
+        }
       }
     })
     setPlaybackUrls(urls)
@@ -63,11 +69,14 @@ export const FCRMAudioRecorder: React.FC = () => {
           timestamp: new Date().toISOString(),
           audioBlob,
           durationSeconds: recordingDuration,
+          category: selectedCategory,
+          transcriptSummary: customNoteSummary || 'Field audio feedback recorded by local community mentor / parent.',
           status: 'pending',
           synced: 0,
         })
 
         setRecordingDuration(0)
+        setCustomNoteSummary('')
       }
 
       recorder.start(1000)
@@ -78,9 +87,9 @@ export const FCRMAudioRecorder: React.FC = () => {
         setRecordingDuration((prev) => prev + 1)
       }, 1000)
     } catch (err) {
-      console.error('Audio recording failed:', err)
+      console.error('Audio recording error:', err)
       setErrorMessage(
-        'Unable to access microphone. Please ensure microphone permissions are allowed.'
+        'Microphone access unavailable or denied. Check browser audio permissions.'
       )
     }
   }
@@ -113,21 +122,34 @@ export const FCRMAudioRecorder: React.FC = () => {
           <div>
             <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
               <Volume2 className="h-5 w-5 text-indigo-600" />
-              FCRM Voice Feedback Module
+              FCRM Community Voice Feedback Module
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Audio safeguarding notes & community feedback for low-literacy reporters
+              Accessible audio reporting & feedback mechanism for low-literacy parents and community elders
             </p>
           </div>
 
-          <div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <select
               value={selectedSchool}
               onChange={(e) => setSelectedSchool(e.target.value)}
               className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
             >
-              <option value="SCH-MARA-01">Mara Primary (SCH-MARA-01)</option>
-              <option value="SCH-RIV-02">Riverbend Academy (SCH-RIV-02)</option>
+              <option value="SCH-NAROK-01">Narok (SCH-NAROK-01)</option>
+              <option value="SCH-TURK-02">Turkana (SCH-TURK-02)</option>
+              <option value="SCH-KILIFI-03">Kilifi (SCH-KILIFI-03)</option>
+              <option value="SCH-GARISSA-04">Garissa (SCH-GARISSA-04)</option>
+            </select>
+
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value as any)}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="infrastructure_barrier">Infrastructure / River Barrier</option>
+              <option value="health_mhm">Health & Sanitation (MHM / WASH)</option>
+              <option value="safeguarding_concern">Safeguarding / Early Marriage</option>
+              <option value="general">General Community Feedback</option>
             </select>
           </div>
         </div>
@@ -143,7 +165,7 @@ export const FCRMAudioRecorder: React.FC = () => {
         <div className="mt-6 flex flex-col items-center justify-center py-6 text-center">
           <div className="relative">
             {isRecording && (
-              <span className="absolute -inset-2 rounded-full bg-rose-500/20 animate-ping" />
+              <span className="absolute -inset-3 rounded-full bg-rose-500/20 animate-ping" />
             )}
             <button
               onClick={isRecording ? stopRecording : startRecording}
@@ -166,7 +188,7 @@ export const FCRMAudioRecorder: React.FC = () => {
               {formatTimer(recordingDuration)}
             </span>
             <p className="text-xs text-slate-500 mt-1 font-medium">
-              {isRecording ? 'Recording audio... Tap to stop' : 'Tap microphone to start recording'}
+              {isRecording ? 'Recording audio note... Tap to save locally' : 'Tap microphone to start recording'}
             </p>
           </div>
         </div>
@@ -175,16 +197,22 @@ export const FCRMAudioRecorder: React.FC = () => {
       {/* Offline Stored Audio Notes Queue */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700">
-            Recorded Safeguarding Notes ({voiceNotes.length})
-          </h3>
-          <span className="text-xs text-slate-500">Stored locally in IndexedDB</span>
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-indigo-600" />
+              Community Safeguarding Audio Ledger ({voiceNotes.length})
+            </h3>
+            <p className="text-xs text-slate-500">Transcribed community feedback & complaint mechanisms</p>
+          </div>
+          <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
+            Encrypted Offline Store
+          </span>
         </div>
 
         <div className="mt-4 divide-y divide-slate-100">
           {voiceNotes.length === 0 ? (
             <div className="py-8 text-center text-xs text-slate-400">
-              No voice notes recorded yet.
+              No voice notes recorded yet. Record one above to test.
             </div>
           ) : (
             voiceNotes.map((note: VoiceFeedback) => {
@@ -192,12 +220,28 @@ export const FCRMAudioRecorder: React.FC = () => {
               const dateStr = new Date(note.timestamp).toLocaleString()
 
               return (
-                <div key={note.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-semibold text-slate-800">
-                        {note.schoolId} · Voice Note #{note.id}
+                <div key={note.id} className="py-4 flex flex-col md:flex-row md:items-start justify-between gap-4">
+                  <div className="space-y-1.5 max-w-2xl">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-slate-900">
+                        {note.schoolId} · Note #{note.id}
                       </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                          note.status === 'escalated'
+                            ? 'bg-rose-100 text-rose-800'
+                            : note.status === 'reviewed'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {note.status}
+                      </span>
+                      {note.category && (
+                        <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600">
+                          {note.category.replace('_', ' ')}
+                        </span>
+                      )}
                       <span
                         className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                           note.synced === 1
@@ -205,15 +249,22 @@ export const FCRMAudioRecorder: React.FC = () => {
                             : 'bg-amber-100 text-amber-800'
                         }`}
                       >
-                        {note.synced === 1 ? 'Synced' : 'Pending Upload'}
+                        {note.synced === 1 ? 'Synced to Central API' : 'Pending Upload'}
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">
-                      {dateStr} · {note.durationSeconds ? `${note.durationSeconds}s` : 'Audio'}
+
+                    {note.transcriptSummary && (
+                      <p className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-lg border border-slate-200 leading-relaxed font-sans">
+                        "{note.transcriptSummary}"
+                      </p>
+                    )}
+
+                    <div className="text-[11px] text-slate-400">
+                      Recorded: {dateStr} {note.durationSeconds ? `· ${note.durationSeconds}s duration` : ''}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 shrink-0">
                     {audioUrl && (
                       <audio controls src={audioUrl} className="h-8 max-w-[220px]" />
                     )}

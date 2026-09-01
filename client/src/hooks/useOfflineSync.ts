@@ -106,7 +106,7 @@ export const useOfflineSync = (): SyncStatus => {
 
       // 3. Upload Voice Feedback Blobs
       for (const voiceItem of unsyncedVoice) {
-        if (!voiceItem.id) continue
+        if (!voiceItem.id || !voiceItem.audioBlob) continue
 
         const formData = new FormData()
         formData.append('audio', voiceItem.audioBlob, `voice-${voiceItem.id}.webm`)
