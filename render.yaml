@@ -19,10 +19,8 @@ services:
           property: connectionString
 
   # 2. Frontend Static Site (React PWA)
-  - type: web
+  - type: static
     name: project-safe-client
-    runtime: static
-    plan: free
     rootDir: client
     buildCommand: npm install && npm run build
     staticPublishPath: dist
